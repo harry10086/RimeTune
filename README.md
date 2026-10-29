@@ -189,21 +189,21 @@ npm run tauri build -- --target x86_64-apple-darwin
 npm run tauri build -- --target universal-apple-darwin
 ```
 - **输出文件**：
-  - `.dmg` 拖拽式安装镜像：`src-tauri/target/release/bundle/dmg/RimeTune_0.3.0_aarch64.dmg`
+  - `.dmg` 拖拽式安装镜像：`src-tauri/target/release/bundle/dmg/RimeTune_0.3.1_aarch64.dmg`
   - `.app` 应用程序包：`src-tauri/target/release/bundle/macos/RimeTune.app`
 
 #### 🐧 Linux 平台打包 (生成 .deb、.AppImage 与独立二进制)
-在 Linux 终端中运行：
+在 Linux (x86_64 或 ARM64 / 树莓派) 终端中运行：
 ```bash
-# 生成 .deb 与 .AppImage 完整发布包
+# 生成 .deb 与 .AppImage 完整发布包（根据当前机器架构自动生成 amd64 或 arm64）
 npm run tauri build
 
 # 或仅生成免安装独立 ELF 二进制程序
 npm run build:portable
 ```
 - **输出文件**：
-  - `.deb` 安装包（Ubuntu / Debian 双击或 `sudo dpkg -i` 安装）：`src-tauri/target/release/bundle/deb/RimeTune_0.3.0_amd64.deb`
-  - `.AppImage` 免安装便携版（赋予执行权限 `chmod +x` 即可直接双击运行）：`src-tauri/target/release/bundle/appimage/RimeTune_0.3.0_amd64.AppImage`
+  - `.deb` 安装包（Ubuntu / Debian / 树莓派双击或 `sudo dpkg -i` 安装）：`src-tauri/target/release/bundle/deb/RimeTune_0.3.1_amd64.deb`（或 `_arm64.deb`）
+  - `.AppImage` 免安装便携版（赋予执行权限 `chmod +x` 即可直接运行）：`src-tauri/target/release/bundle/appimage/RimeTune_0.3.1_amd64.AppImage`（或 `_aarch64.AppImage`）
   - 独立 ELF 二进制文件：`src-tauri/target/release/RimeTune`
 
 ---
@@ -231,6 +231,9 @@ npm run build:portable
   - **位置**：默认位于 `~/Library/Rime` 目录。RimeTune 启动时会自动检测并绑定该路径。
 
 #### 🐧 Linux 相关
+- **Q: 树莓派 (Raspberry Pi) 或 ARM64 设备本地编译时卡死或被 Kill？**
+  - **原因**：Rust 编译阶段并行度高且消耗较多内存。若树莓派物理内存在 1GB~2GB，可能会因内存耗尽 (OOM) 导致进程退出。
+  - **解决**：在编译前临时配置 2GB~4GB Swap 交换空间，或者限制编译并发数（如 `CARGO_BUILD_JOBS=2 npm run tauri build`）。
 - **Q: 编译报错 `Package 'webkit2gtk-4.1', not found` 或缺少 openssl**
   - **解决**：检查系统是否安装了 `libwebkit2gtk-4.1-dev`（Ubuntu/Debian）或 `webkit2gtk-4.1`（Arch），详见上方 Linux 依赖安装指南。
 - **Q: Fcitx5-Rime 与 IBus-Rime 用户目录默认在哪里？**

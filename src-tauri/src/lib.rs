@@ -309,11 +309,45 @@ pub struct TypingStatsDay {
 
 /// 读取输入法侧 `input_stats.lua` 写入的每日字数统计（只含日期与字数）。
 #[tauri::command]
-fn read_typing_stats() -> Result<Vec<TypingStatsDay>, String> {
-    let appdata = std::env::var("APPDATA").map_err(|_| "无法定位 APPDATA 目录".to_string())?;
-    let path = std::path::Path::new(&appdata)
-        .join("Rime")
-        .join("typing_stats.jsonl");
+fn read_typing_stats(user_dir: Option<String>) -> Result<Vec<TypingStatsDay>, String> {
+    let base_dir = match user_dir {
+        Some(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
+        _ => {
+            let (_, detected_user_dir, _) = detector::detect_weasel_paths();
+            if let Some(d) = detected_user_dir {
+                std::path::PathBuf::from(d)
+            } else {
+                #[cfg(windows)]
+                {
+                    let appdata = std::env::var("APPDATA").map_err(|_| "无法定位 Rime 用户目录或 APPDATA".to_string())?;
+                    std::path::PathBuf::from(appdata).join("Rime")
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let home = std::env::var("HOME").map_err(|_| "无法定位用户 HOME 目录".to_string())?;
+                    std::path::PathBuf::from(home).join("Library/Rime")
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let home = std::env::var("HOME").map_err(|_| "无法定位用户 HOME 目录".to_string())?;
+                    let candidates = [
+                        std::path::PathBuf::from(&home).join(".local/share/fcitx5/rime"),
+                        std::path::PathBuf::from(&home).join(".config/fcitx5/rime"),
+                        std::path::PathBuf::from(&home).join(".config/ibus/rime"),
+                    ];
+                    candidates.into_iter().find(|p| p.exists()).unwrap_or_else(|| {
+                        std::path::PathBuf::from(home).join(".local/share/fcitx5/rime")
+                    })
+                }
+                #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+                {
+                    return Err("未知系统平台，无法定位 Rime 用户目录".to_string());
+                }
+            }
+        }
+    };
+
+    let path = base_dir.join("typing_stats.jsonl");
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -583,5 +617,34 @@ author: "Tester"
         // Test invalid yaml syntax
         let invalid = "name: [unclosed list";
         assert!(patcher::parse_color_scheme_yaml(invalid).is_err());
+    }
+
+    #[test]
+    fn test_yaml_escape_and_quote_issue_1() {
+        use patcher::{yaml_escape_str, validate_yaml};
+
+        // 薄荷拼音中的复杂作者字段（含双引号，复现 Issue #1）
+        let raw_author = r#"Mintimate <"Mintimate's Blog">"#;
+        let escaped = yaml_escape_str(raw_author);
+        assert_eq!(escaped, r#"Mintimate <\"Mintimate's Blog\">"#);
+
+        // 拼接为 YAML 补丁
+        let yaml_snippet = format!(
+            "patch:\n  \"preset_color_schemes/mint_light_green/author\": \"{}\"\n",
+            escaped
+        );
+
+        // 校验 YAML 合法性
+        let val_res = validate_yaml(&yaml_snippet, "weasel.custom.yaml");
+        assert!(val_res.is_ok(), "YAML 验证失败: {:?}", val_res.err());
+
+        // 解析并验证反序列化出的内容恢复为原始字符串
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&yaml_snippet).unwrap();
+        let author_val = parsed
+            .get("patch")
+            .and_then(|p| p.get("preset_color_schemes/mint_light_green/author"))
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(author_val, raw_author);
     }
 }

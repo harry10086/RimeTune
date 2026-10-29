@@ -27,7 +27,11 @@ function fmtNum(n: number): string {
   return n.toLocaleString('zh-CN');
 }
 
-export function StatsView() {
+interface StatsViewProps {
+  userDir?: string;
+}
+
+export function StatsView({ userDir }: StatsViewProps) {
   const [days, setDays] = useState<DayStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +40,7 @@ export function StatsView() {
     setLoading(true);
     setError(null);
     try {
-      const res = await invoke<DayStat[]>('read_typing_stats');
+      const res = await invoke<DayStat[]>('read_typing_stats', { userDir });
       setDays(res ?? []);
     } catch (e) {
       setError(String(e));
@@ -47,7 +51,7 @@ export function StatsView() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [userDir]);
 
   const map = useMemo(() => {
     const m = new Map<string, number>();
@@ -158,7 +162,8 @@ export function StatsView() {
           <div>
             <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)' }}>打字统计</div>
             <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
-              只统计每天上屏的字数，不记录任何输入内容 · 数据存于 <code>%APPDATA%\Rime\typing_stats.jsonl</code>
+              只统计每天上屏的字数，不记录任何输入内容 · 数据存于{' '}
+              <code>{userDir ? `${userDir.replace(/\\/g, '/')}/typing_stats.jsonl` : '用户目录/typing_stats.jsonl'}</code>
             </div>
           </div>
         </div>
@@ -319,8 +324,9 @@ export function StatsView() {
       {!hasData && !loading && (
         <div style={{ ...card, borderStyle: 'dashed', color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.9 }}>
           <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>还没有统计数据</div>
-          统计模块需要先在输入法里生效：确认 <code>%APPDATA%\Rime\lua\input_stats.lua</code> 存在、方案里挂了{' '}
-          <code>lua_filter@*input_stats</code>，然后部署一次。之后正常打字，字数会自动累计，再回来点「刷新」。
+          统计模块需要先在输入法里生效：确认{' '}
+          <code>{userDir ? `${userDir.replace(/\\/g, '/')}/lua/input_stats.lua` : 'Rime 用户目录/lua/input_stats.lua'}</code>{' '}
+          存在、方案里挂了 <code>lua_filter@*input_stats</code>，然后部署一次。之后正常打字，字数会自动累计，再回来点「刷新」。
         </div>
       )}
     </div>

@@ -743,7 +743,7 @@ export function App() {
                 />
               )}
 
-              {activeTab === 'stats' && <StatsView />}
+              {activeTab === 'stats' && <StatsView userDir={env?.rime_user_dir} />}
             </>
           )}
         </div>

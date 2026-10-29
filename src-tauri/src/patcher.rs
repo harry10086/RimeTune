@@ -2,6 +2,29 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// 转义 YAML 双引号字符串，确保生成的 YAML 语法严格合法
+pub fn yaml_escape_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// 校验生成的 YAML 补丁字符串合法性，防止非法语法导致输入法配置全量失效
+pub fn validate_yaml(content: &str, file_name: &str) -> Result<(), String> {
+    serde_yaml::from_str::<serde_yaml::Value>(content)
+        .map_err(|e| format!("生成 {} 补丁失败，YAML 语法自检未通过: {}", file_name, e))?;
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ColorSchemeItem {
     pub id: String,
@@ -3318,15 +3341,15 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     weasel_yaml.push_str("  # 外观样式定制\n");
     weasel_yaml.push_str(&format!("  \"style/horizontal\": {}\n", config.style.horizontal));
     weasel_yaml.push_str(&format!("  \"style/page_size\": {}\n", config.style.page_size));
-    weasel_yaml.push_str(&format!("  \"style/color_scheme\": \"{}\"\n", config.style.color_scheme));
+    weasel_yaml.push_str(&format!("  \"style/color_scheme\": \"{}\"\n", yaml_escape_str(&config.style.color_scheme)));
     if let Some(dark) = &config.style.color_scheme_dark {
-        weasel_yaml.push_str(&format!("  \"style/color_scheme_dark\": \"{}\"\n", dark));
+        weasel_yaml.push_str(&format!("  \"style/color_scheme_dark\": \"{}\"\n", yaml_escape_str(dark)));
     }
-    weasel_yaml.push_str(&format!("  \"style/font_face\": \"{}\"\n", config.style.font_face));
+    weasel_yaml.push_str(&format!("  \"style/font_face\": \"{}\"\n", yaml_escape_str(&config.style.font_face)));
     weasel_yaml.push_str(&format!("  \"style/font_point\": {}\n", config.style.font_point));
     if let Some(cf) = &config.style.comment_font_face {
         if !cf.trim().is_empty() {
-            weasel_yaml.push_str(&format!("  \"style/comment_font_face\": \"{}\"\n", cf.trim()));
+            weasel_yaml.push_str(&format!("  \"style/comment_font_face\": \"{}\"\n", yaml_escape_str(cf.trim())));
         }
     }
     if let Some(cp) = config.style.comment_font_point {
@@ -3334,7 +3357,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     }
     if let Some(lf) = &config.style.label_font_face {
         if !lf.trim().is_empty() {
-            weasel_yaml.push_str(&format!("  \"style/label_font_face\": \"{}\"\n", lf.trim()));
+            weasel_yaml.push_str(&format!("  \"style/label_font_face\": \"{}\"\n", yaml_escape_str(lf.trim())));
         }
     }
     if let Some(lp) = config.style.label_font_point {
@@ -3371,11 +3394,12 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     for app in &config.app_options {
         let name = app.app_name.trim();
         if !name.is_empty() {
+            let escaped_name = yaml_escape_str(name);
             if app.ascii_mode {
-                weasel_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": true\n", name));
+                weasel_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": true\n", escaped_name));
             }
             if app.inline_preedit {
-                weasel_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": true\n", name));
+                weasel_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": true\n", escaped_name));
             }
         }
     }
@@ -3397,10 +3421,10 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     if !schemes_to_save.is_empty() {
         weasel_yaml.push_str("\n  # 配色方案定义（用户自定义皮肤与调色覆写）\n");
         for curr in schemes_to_save {
-            let sid = &curr.id;
+            let sid = yaml_escape_str(&curr.id);
             let fmt = curr.color_format.as_deref();
-            weasel_yaml.push_str(&format!("  \"preset_color_schemes/{}/name\": \"{}\"\n", sid, curr.name));
-            weasel_yaml.push_str(&format!("  \"preset_color_schemes/{}/author\": \"{}\"\n", sid, curr.author));
+            weasel_yaml.push_str(&format!("  \"preset_color_schemes/{}/name\": \"{}\"\n", sid, yaml_escape_str(&curr.name)));
+            weasel_yaml.push_str(&format!("  \"preset_color_schemes/{}/author\": \"{}\"\n", sid, yaml_escape_str(&curr.author)));
             if let Some(f) = fmt {
                 if f.to_ascii_lowercase() != "abgr" {
                     weasel_yaml.push_str(&format!("  \"preset_color_schemes/{}/color_format\": {}\n", sid, f));
@@ -3438,6 +3462,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     }
 
+    validate_yaml(&weasel_yaml, "weasel.custom.yaml")?;
     fs::write(u_path.join("weasel.custom.yaml"), weasel_yaml)
         .map_err(|e| format!("写入 weasel.custom.yaml 失败: {}", e))?;
 
@@ -3480,6 +3505,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     default_yaml.push_str(&format!("  \"switches/@name/full_shape/reset\": {}\n", if config.rime_ice_toggles.full_shape { 1 } else { 0 }));
     default_yaml.push_str(&format!("  \"switches/@name/ascii_punct/reset\": {}\n", if config.rime_ice_toggles.ascii_punct { 1 } else { 0 }));
 
+    validate_yaml(&default_yaml, "default.custom.yaml")?;
     fs::write(u_path.join("default.custom.yaml"), default_yaml)
         .map_err(|e| format!("写入 default.custom.yaml 失败: {}", e))?;
 
@@ -3685,11 +3711,12 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         if config.rime_ice_toggles.enable_grammar && !config.rime_ice_toggles.grammar_model.trim().is_empty() {
             let model = config.rime_ice_toggles.grammar_model.trim();
             rime_ice_yaml.push_str("\n  # Octagram 上下文语言模型补丁\n");
-            rime_ice_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", model));
+            rime_ice_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
             rime_ice_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", config.rime_ice_toggles.grammar_collocation_max_length));
             rime_ice_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", config.rime_ice_toggles.grammar_collocation_min_length));
         }
 
+        let _ = validate_yaml(&rime_ice_yaml, "rime_ice.custom.yaml");
         let _ = fs::write(u_path.join("rime_ice.custom.yaml"), &rime_ice_yaml);
     }
 
@@ -3734,6 +3761,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             frost_yaml.push_str(&fuzzy_yaml_block);
             frost_yaml.push_str(&page_keys_yaml_block);
 
+            let _ = validate_yaml(&frost_yaml, &format!("{}.custom.yaml", frost_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", frost_id)), &frost_yaml);
         }
     }
@@ -3778,6 +3806,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             mint_yaml.push_str(&fuzzy_yaml_block);
             mint_yaml.push_str(&page_keys_yaml_block);
 
+            let _ = validate_yaml(&mint_yaml, &format!("{}.custom.yaml", mint_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", mint_id)), &mint_yaml);
         }
     }
@@ -3844,7 +3873,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                     2
                 };
                 wx_yaml.push_str("  # Octagram 上下文语言模型补丁\n");
-                wx_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", model));
+                wx_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
                 wx_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
                 wx_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
                 wx_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
@@ -3853,6 +3882,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 wx_yaml.push_str("  \"grammar/language\": ~\n");
             }
 
+            let _ = validate_yaml(&wx_yaml, &format!("{}.custom.yaml", wx_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", wx_id)), &wx_yaml);
         }
     }
@@ -3882,6 +3912,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 other_yaml.push_str(&fuzzy_yaml_block);
                 other_yaml.push_str(&page_keys_yaml_block);
 
+                let _ = validate_yaml(&other_yaml, &format!("{}.custom.yaml", s.id));
                 let _ = fs::write(u_path.join(format!("{}.custom.yaml", s.id)), &other_yaml);
             }
         }

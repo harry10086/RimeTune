@@ -130,9 +130,50 @@ jobs:
           path: staging-linux/*
           if-no-files-found: error
 
+  build-linux-arm64:
+    name: Build Linux ARM64 (Deb & AppImage for Raspberry Pi)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux ARM64 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev build-essential libfuse2
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Linux ARM64 Bundles (Deb & AppImage)
+        run: npm run tauri build
+
+      - name: Stage Linux ARM64 Artifacts
+        run: |
+          mkdir -p staging-linux-arm64
+          cp src-tauri/target/release/bundle/deb/*.deb staging-linux-arm64/ || true
+          cp src-tauri/target/release/bundle/appimage/*.AppImage staging-linux-arm64/ || true
+          ls -la staging-linux-arm64/
+
+      - name: Upload Linux ARM64 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-artifacts
+          path: staging-linux-arm64/*
+          if-no-files-found: error
+
   publish-release:
     name: Publish Multiplatform Release
-    needs: [build-windows, build-macos, build-linux]
+    needs: [build-windows, build-macos, build-linux, build-linux-arm64]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -179,6 +220,14 @@ jobs:
             ---
 
             ### 🚀 更新亮点
+            - **彻底修复皮肤配置 YAML 转义缺陷 (Issue #1)**：
+              - 修复皮肤方案中 `author` / `name`（如薄荷输入法 `Mintimate <"Mintimate's Blog">`）含有双引号时产生非法 YAML 导致小狼毫配置全量失效的严重问题；
+              - 引入全量 YAML 字符串安全转义，并在写入磁盘前增加 YAML 语法合法性校验自检，坚决杜绝坏配置落盘；
+            - **打字统计全平台支持与跨平台目录动态适配**：
+              - 配合 `extras/input_stats.lua` 采集器，在仪表盘侧边栏新增「打字统计」可视化看板（支持今日、近 7 天、近 30 天统计与 12 周活跃热力图）；
+              - 重构路径动态定位逻辑，彻底解决在 macOS、Linux 及自定义 Rime 用户路径下找不到数据文件的跨平台问题；
+            - **新增 Linux ARM64 (树莓派 Raspberry Pi) 官方构建支持**：
+              - 原生支持基于 64 位 Raspberry Pi OS、Ubuntu ARM64 等单板机环境，构建提供专用 ARM64 `.deb` 与 `.AppImage`；
             - **WeaselTune 全新升级为 RimeTune 跨平台配置中心**：从原专属 Windows 小狼毫工具正式蜕变升级为统一的 Rime 中州韵全平台配置中心；
             - **底层路径归一化重构**：消除跨系统环境下的路径解析差异，保障跨环境一致性；
             - **万象拼音 Octagram 上下文语言模型完整支持**：
@@ -197,9 +246,9 @@ jobs:
               - `RimeTune.exe` / `RimeTune-windows-x64-portable.zip`：纯绿色免安装便携版（解压即用，原生无冗余）
             - **🍎 macOS**：macOS 11 (Big Sur) 及以上（原生支持 Apple Silicon M1/M2/M3/M4 系列芯片）
               - `.dmg`：拖拽式安装镜像
-            - **🐧 Linux**：Ubuntu 22.04+、Debian 11/12、Arch Linux、Fedora 38+、Linux Mint、Deepin / 统信 UOS 等
-              - `.AppImage`：免安装便携单文件（全发行版通用）
-              - `.deb`：Debian / Ubuntu 系标准安装包
+            - **🐧 Linux (x86_64 与 ARM64 树莓派)**：Ubuntu 22.04+、Debian 11/12、Raspberry Pi OS (64位)、Arch Linux、Fedora 38+、Linux Mint、Deepin / 统信 UOS 等
+              - `.AppImage`：免安装便携单文件（提供 x86_64 与 aarch64 双架构）
+              - `.deb`：Debian / Ubuntu / 树莓派等标准安装包（提供 amd64 与 arm64 双架构）
 
             ---
 
