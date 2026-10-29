@@ -301,6 +301,49 @@ fn parse_color_scheme_yaml(yaml_str: String) -> Result<patcher::ColorSchemeItem,
 
 use tauri::Manager;
 
+#[derive(serde::Serialize)]
+pub struct TypingStatsDay {
+    pub date: String,
+    pub chars: u64,
+}
+
+/// 读取输入法侧 `input_stats.lua` 写入的每日字数统计（只含日期与字数）。
+#[tauri::command]
+fn read_typing_stats() -> Result<Vec<TypingStatsDay>, String> {
+    let appdata = std::env::var("APPDATA").map_err(|_| "无法定位 APPDATA 目录".to_string())?;
+    let path = std::path::Path::new(&appdata)
+        .join("Rime")
+        .join("typing_stats.jsonl");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读取 typing_stats.jsonl 失败: {e}"))?;
+
+    let mut daily: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(date) = value.get("date").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(chars) = value.get("chars").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        *daily.entry(date.to_string()).or_insert(0) += chars;
+    }
+
+    Ok(daily
+        .into_iter()
+        .map(|(date, chars)| TypingStatsDay { date, chars })
+        .collect())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -343,6 +386,7 @@ pub fn run() {
             delete_custom_dict,
             parse_color_scheme_yaml,
             get_phrase_files_status,
+            read_typing_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running WeaselTune");
