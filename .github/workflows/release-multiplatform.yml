@@ -53,7 +53,7 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    name: Build macOS (Apple Silicon DMG)
+    name: Build macOS (Universal DMG: Intel + Apple Silicon)
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -68,18 +68,18 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build macOS DMG
-        run: npm run tauri build -- --target aarch64-apple-darwin
+      - name: Build macOS Universal DMG
+        run: npm run tauri build -- --target universal-apple-darwin
 
       - name: Stage macOS Artifacts
         run: |
           mkdir -p staging-macos
-          cp src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg staging-macos/
+          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg staging-macos/
           ls -la staging-macos/
 
       - name: Upload macOS Artifacts
@@ -244,8 +244,8 @@ jobs:
             ### 💻 系统与平台支持 (System Requirements)
             - **🪟 Windows**：Windows 10 / 11 (64位)
               - `RimeTune.exe` / `RimeTune-windows-x64-portable.zip`：纯绿色免安装便携版（解压即用，原生无冗余）
-            - **🍎 macOS**：macOS 11 (Big Sur) 及以上（原生支持 Apple Silicon M1/M2/M3/M4 系列芯片）
-              - `.dmg`：拖拽式安装镜像
+            - **🍎 macOS**：macOS 11 (Big Sur) 及以上（提供 Universal 通用架构 DMG，原生通吃 Apple Silicon M1/M2/M3/M4 与 Intel x86_64 处理器）
+              - `.dmg`：Universal 通用架构拖拽式安装镜像
             - **🐧 Linux (x86_64 与 ARM64 树莓派)**：Ubuntu 22.04+、Debian 11/12、Raspberry Pi OS (64位)、Arch Linux、Fedora 38+、Linux Mint、Deepin / 统信 UOS 等
               - `.AppImage`：免安装便携单文件（提供 x86_64 与 aarch64 双架构）
               - `.deb`：Debian / Ubuntu / 树莓派等标准安装包（提供 amd64 与 arm64 双架构）

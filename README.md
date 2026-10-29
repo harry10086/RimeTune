@@ -72,6 +72,11 @@ RimeTune 是一款专为 **Rime（中州韵输入法引擎）全平台（Windows
     - **全局部署加载遮罩**：保存并部署时自动显示全屏防重入遮罩并互斥锁定所有操作按钮，彻底消除高频点击导致的系统未响应判定与白屏强制结束；
     - 后台调用注入静默标志，部署过程无控制台黑色弹窗闪烁。
 
+12. **打字统计与活跃度分析（一键极简部署）**：
+    - **一键极简开启**：无需繁琐的手动操作，点击「一键开启打字统计」，系统全自动安装 `input_stats.lua` 采集脚本、挂载方案过滤器补丁并触发重新部署；
+    - **本地离线安全**：仅在文字上屏时在本地记录字数与日期，不收集任何按键记录与输入内容，零网络请求；
+    - **全景可视化**：实时展示今日、近 7 天、近 30 天与累计打字字数，提供近 30 天打字趋势柱状图与最近 12 周活跃度热力图。
+
 ---
 
 ## 🛠️ 多平台开发与构建指南 (Multiplatform Guide)
@@ -189,7 +194,7 @@ npm run tauri build -- --target x86_64-apple-darwin
 npm run tauri build -- --target universal-apple-darwin
 ```
 - **输出文件**：
-  - `.dmg` 拖拽式安装镜像：`src-tauri/target/release/bundle/dmg/RimeTune_0.3.1_aarch64.dmg`
+  - `.dmg` 拖拽式安装镜像（Universal 架构，通吃 Intel 与 Apple Silicon）：`src-tauri/target/universal-apple-darwin/release/bundle/dmg/RimeTune_0.3.1_universal.dmg`
   - `.app` 应用程序包：`src-tauri/target/release/bundle/macos/RimeTune.app`
 
 #### 🐧 Linux 平台打包 (生成 .deb、.AppImage 与独立二进制)
@@ -276,6 +281,20 @@ RimeTune/
 ---
 
 ## 📦 版本更新日志
+
+### v0.3.1 版本更新摘要
+ * 🛡️ **彻底解决皮肤配色 YAML 转义缺陷 (Issue #1)**：
+   - **双引号与特殊字符严格转义**：修复上游皮肤 `author` 或 `name` 字段（如薄荷输入法 `Mintimate <"Mintimate's Blog">`）含有双引号时产生非法 YAML 破坏小狼毫配置导致全量失效的严重缺陷；
+   - **写入前语法合法性自检拦截**：新增 `validate_yaml` 语法校验机制，在任何配置文件落盘前预检，阻断非法语法并弹出清晰报错，坚决杜绝坏配置落盘破坏输入法环境。
+ * 📊 **打字统计全平台支持与「一键极简开启」体验**：
+   - **一键部署并自动重新部署**：无需翻找系统目录、手动复制文件或修改方案配置，在「打字统计」界面点击「一键开启打字统计」，系统全自动安装轻量本地采集脚本（`input_stats.lua`）、自动为启用的主方案挂载补丁并触发静默重新部署；
+   - **纯本地离线隐私安全**：仅在文字候选上屏时本地累积字数，绝不收集按键序列与输入内容；
+   - **全平台动态路径适配**：彻底重构底层路径解析，原生支持 Windows、macOS（鼠须管）与 Linux（Fcitx5 / IBus）跨平台环境；
+   - **丰富可视化看板**：提供今日/7天/30天/累计字数卡片、近 30 天每日打字柱状图及最近 12 周活跃度热力图。
+ * 🍎 **macOS Universal 2 通用二进制支持（通吃 Intel + Apple Silicon）**：
+   - 官方发布采用 Universal 通用架构 DMG 镜像，单镜像原生适配 Apple Silicon (M1/M2/M3/M4) 系列芯片与 Intel (x86_64) CPU，老款 Mac 与黑苹果用户免转译即装即用。
+ * 🐧 **Linux ARM64 (树莓派 3/4/5 等单板机) 官方构建支持**：
+   - 官方 GitHub Actions CI 新增 Linux ARM64 构建流水线，为基于 64 位 Raspberry Pi OS、Ubuntu ARM64 等单板计算机环境提供原生 `.deb` 与 `.AppImage` 安装包。
 
 ### v0.3.0 版本更新摘要
  * 🚀 **WeaselTune 全新升级为 RimeTune 跨平台配置中心**：

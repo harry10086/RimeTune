@@ -25,6 +25,23 @@ pub fn validate_yaml(content: &str, file_name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 内置的打字统计 Lua 采集器源码（extras/input_stats.lua）
+pub const INPUT_STATS_LUA_CONTENT: &str = include_str!("../../extras/input_stats.lua");
+
+/// 确保用户的 Rime 用户目录下已安装 input_stats.lua
+pub fn ensure_input_stats_lua_installed(user_dir: &str) -> Result<(), String> {
+    let lua_dir = Path::new(user_dir).join("lua");
+    if !lua_dir.exists() {
+        fs::create_dir_all(&lua_dir).map_err(|e| format!("创建 lua 目录失败: {e}"))?;
+    }
+    let target_file = lua_dir.join("input_stats.lua");
+    if !target_file.exists() {
+        fs::write(&target_file, INPUT_STATS_LUA_CONTENT)
+            .map_err(|e| format!("写入 input_stats.lua 失败: {e}"))?;
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ColorSchemeItem {
     pub id: String,
@@ -223,6 +240,9 @@ pub struct RimeIceToggles {
     pub grammar_model: String,
     pub grammar_collocation_max_length: u32,
     pub grammar_collocation_min_length: u32,
+    // 打字统计 (input_stats.lua)
+    #[serde(default)]
+    pub enable_typing_stats: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -272,6 +292,7 @@ impl Default for RimeIceToggles {
             grammar_model: String::new(),
             grammar_collocation_max_length: 6,
             grammar_collocation_min_length: 2,
+            enable_typing_stats: false,
         }
     }
 }
@@ -3312,6 +3333,31 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
         }
     }
 
+    // 探测打字统计模块是否已开启生效
+    let lua_file = u_path.join("lua").join("input_stats.lua");
+    let mut stats_patch_detected = false;
+    for fname in &["rime_ice.custom.yaml", "rime_frost.custom.yaml", "rime_mint.custom.yaml", "wanxiang.custom.yaml"] {
+        if let Ok(c) = fs::read_to_string(u_path.join(fname)) {
+            if c.contains("lua_filter@*input_stats") {
+                stats_patch_detected = true;
+                break;
+            }
+        }
+    }
+    if !stats_patch_detected {
+        for s in &schemas {
+            if s.enabled {
+                if let Ok(c) = fs::read_to_string(u_path.join(format!("{}.custom.yaml", s.id))) {
+                    if c.contains("lua_filter@*input_stats") {
+                        stats_patch_detected = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    rime_ice_toggles.enable_typing_stats = lua_file.exists() && stats_patch_detected;
+
     let dict_files = scan_installed_dicts(user_dir);
     let custom_dicts = scan_custom_dicts(user_dir);
 
@@ -3585,6 +3631,16 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     }
 
+    // 打字统计采集滤镜补丁
+    if config.rime_ice_toggles.enable_typing_stats {
+        let _ = ensure_input_stats_lua_installed(user_dir);
+    }
+    let stats_filter_block = if config.rime_ice_toggles.enable_typing_stats {
+        "\n  # 打字统计采集滤镜 (input_stats.lua)\n  \"engine/filters/@before 0\": lua_filter@*input_stats\n"
+    } else {
+        ""
+    };
+
     // 4. 针对各大拼音方案分别生成专属定制补丁
     let append_switch_patch = |yaml: &mut String, schema_id: &str, switch_name: &str, val: bool| {
         let num_val = if val { 1 } else { 0 };
@@ -3638,6 +3694,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
 
         rime_ice_yaml.push_str(&fuzzy_yaml_block);
         rime_ice_yaml.push_str(&page_keys_yaml_block);
+        rime_ice_yaml.push_str(stats_filter_block);
 
         // 雾凇拼音词库无损外挂清单维护
         let mounted_custom_dicts: Vec<&CustomDictItem> = config.custom_dicts.iter().filter(|d| d.enabled).collect();
@@ -3760,6 +3817,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
 
             frost_yaml.push_str(&fuzzy_yaml_block);
             frost_yaml.push_str(&page_keys_yaml_block);
+            frost_yaml.push_str(stats_filter_block);
 
             let _ = validate_yaml(&frost_yaml, &format!("{}.custom.yaml", frost_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", frost_id)), &frost_yaml);
@@ -3805,6 +3863,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
 
             mint_yaml.push_str(&fuzzy_yaml_block);
             mint_yaml.push_str(&page_keys_yaml_block);
+            mint_yaml.push_str(stats_filter_block);
 
             let _ = validate_yaml(&mint_yaml, &format!("{}.custom.yaml", mint_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", mint_id)), &mint_yaml);
@@ -3858,6 +3917,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
 
             wx_yaml.push_str(&fuzzy_yaml_block);
             wx_yaml.push_str(&page_keys_yaml_block);
+            wx_yaml.push_str(stats_filter_block);
 
             // 万象拼音 Octagram 语言模型补丁
             if config.rime_ice_toggles.enable_grammar && !config.rime_ice_toggles.grammar_model.trim().is_empty() {
@@ -3911,6 +3971,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 append_switch_patch(&mut other_yaml, &s.id, "ascii_punct", config.rime_ice_toggles.ascii_punct);
                 other_yaml.push_str(&fuzzy_yaml_block);
                 other_yaml.push_str(&page_keys_yaml_block);
+                other_yaml.push_str(stats_filter_block);
 
                 let _ = validate_yaml(&other_yaml, &format!("{}.custom.yaml", s.id));
                 let _ = fs::write(u_path.join(format!("{}.custom.yaml", s.id)), &other_yaml);

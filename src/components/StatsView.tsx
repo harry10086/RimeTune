@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChartColumnBig, RefreshCw } from 'lucide-react';
+import {
+  ChartColumnBig,
+  RefreshCw,
+  Sparkles,
+  CheckCircle2,
+  Power,
+  ShieldCheck,
+  Flame,
+} from 'lucide-react';
+import { DeployResult, TypingStatsStatus } from '../types';
 
 interface DayStat {
   date: string;
@@ -29,23 +38,60 @@ function fmtNum(n: number): string {
 
 interface StatsViewProps {
   userDir?: string;
+  showToast?: (text: string, type?: 'success' | 'error') => void;
 }
 
-export function StatsView({ userDir }: StatsViewProps) {
+export function StatsView({ userDir, showToast }: StatsViewProps) {
   const [days, setDays] = useState<DayStat[]>([]);
+  const [status, setStatus] = useState<TypingStatsStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await invoke<DayStat[]>('read_typing_stats', { userDir });
-      setDays(res ?? []);
+      const [statsRes, statusRes] = await Promise.all([
+        invoke<DayStat[]>('read_typing_stats', { userDir }),
+        invoke<TypingStatsStatus>('get_typing_stats_status', { userDir }).catch(() => null),
+      ]);
+      setDays(statsRes ?? []);
+      if (statusRes) {
+        setStatus(statusRes);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggle = async (enable: boolean) => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const res = await invoke<DeployResult>('set_typing_stats_enabled', {
+        userDir,
+        enabled: enable,
+      });
+      if (res.success) {
+        showToast?.(
+          enable
+            ? '打字统计已成功启用并完成重新部署！现在正常输入即可自动累计字数。'
+            : '打字统计已停用并重新部署。',
+          'success'
+        );
+        await load();
+      } else {
+        setError(res.message);
+        showToast?.(res.message, 'error');
+      }
+    } catch (e) {
+      setError(String(e));
+      showToast?.(`操作失败: ${e}`, 'error');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -102,6 +148,7 @@ export function StatsView({ userDir }: StatsViewProps) {
     if (r < 0.75) return 3;
     return 4;
   };
+
   const levelColor = (lv: number) => {
     switch (lv) {
       case 1:
@@ -138,11 +185,13 @@ export function StatsView({ userDir }: StatsViewProps) {
     lineHeight: 1.1,
   };
 
+  const isEnabled = status?.enabled;
   const hasData = days.length > 0 && total > 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', maxWidth: '1200px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
+      {/* 顶部标题与快速控制栏 */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div
             style={{
@@ -160,35 +209,116 @@ export function StatsView({ userDir }: StatsViewProps) {
             <ChartColumnBig size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)' }}>打字统计</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)' }}>打字统计</span>
+              {status && (
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: isEnabled ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.12)',
+                    color: isEnabled ? 'var(--accent-emerald)' : 'var(--text-muted)',
+                    border: `1px solid ${isEnabled ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.2)'}`,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: isEnabled ? '#22c55e' : '#94a3b8',
+                    }}
+                  />
+                  {isEnabled ? '统计运行中' : '未开启'}
+                </span>
+              )}
+            </div>
             <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
-              只统计每天上屏的字数，不记录任何输入内容 · 数据存于{' '}
-              <code>{userDir ? `${userDir.replace(/\\/g, '/')}/typing_stats.jsonl` : '用户目录/typing_stats.jsonl'}</code>
+              只统计每日上屏字数，不记录任何输入内容 · 数据存储于本地 <code>typing_stats.jsonl</code>
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '9px 16px',
-            borderRadius: '10px',
-            border: '1px solid var(--border-accent)',
-            backgroundColor: 'var(--accent-glow)',
-            color: 'var(--accent)',
-            fontSize: '13px',
-            fontWeight: 700,
-            cursor: loading ? 'default' : 'pointer',
-            opacity: loading ? 0.6 : 1,
-          }}
-        >
-          <RefreshCw size={15} className={loading ? 'spin' : ''} />
-          {loading ? '读取中...' : '刷新'}
-        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* 一键开启/停用快捷按钮 */}
+          {isEnabled ? (
+            <button
+              type="button"
+              onClick={() => handleToggle(false)}
+              disabled={actionLoading || loading}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '9px 14px',
+                borderRadius: '10px',
+                border: '1px solid var(--border)',
+                backgroundColor: 'var(--bg-hover)',
+                color: 'var(--text-dim)',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: actionLoading ? 'default' : 'pointer',
+                opacity: actionLoading ? 0.6 : 1,
+              }}
+              title="停用统计模块并重新部署"
+            >
+              <Power size={14} />
+              {actionLoading ? '部署中...' : '停用统计'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleToggle(true)}
+              disabled={actionLoading || loading}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '9px 16px',
+                borderRadius: '10px',
+                border: '1px solid var(--border-accent)',
+                backgroundColor: 'var(--accent-glow)',
+                color: 'var(--accent)',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: actionLoading ? 'default' : 'pointer',
+                boxShadow: '0 2px 10px rgba(56, 189, 248, 0.15)',
+                opacity: actionLoading ? 0.6 : 1,
+              }}
+            >
+              <Sparkles size={15} />
+              {actionLoading ? '正在配置部署...' : '一键开启打字统计'}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading || actionLoading}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '9px 14px',
+              borderRadius: '10px',
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--bg-card)',
+              color: 'var(--text-main)',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: loading ? 'default' : 'pointer',
+              opacity: loading ? 0.6 : 1,
+            }}
+          >
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            {loading ? '读取中...' : '刷新'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -200,13 +330,131 @@ export function StatsView({ userDir }: StatsViewProps) {
             fontSize: '13px',
           }}
         >
-          读取统计失败：{error}
+          {error}
         </div>
       )}
 
+      {/* 未开启状态下的引导卡片 */}
+      {!isEnabled && (
+        <div
+          style={{
+            ...card,
+            background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(99, 102, 241, 0.06) 100%)',
+            border: '1px solid var(--border-accent)',
+            padding: '20px 24px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '280px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 800, color: 'var(--text-main)' }}>
+                <Sparkles size={18} color="var(--accent)" />
+                一键启用打字统计功能
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--text-dim)', marginTop: '6px', lineHeight: 1.7 }}>
+                无需手动查找目录或复制脚本，点击右侧按钮，RimeTune 将自动为您：<br />
+                1. 在用户目录自动部署轻量采集脚本 <code>input_stats.lua</code>；<br />
+                2. 结构化挂载补丁并自动执行重新部署。<br />
+                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                  <ShieldCheck size={14} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '3px' }} />
+                  仅在文字上屏时在本地记录字数，绝对不抓取具体键盘内容，完全离线纯净。
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleToggle(true)}
+              disabled={actionLoading}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 24px',
+                borderRadius: '12px',
+                backgroundColor: 'var(--accent)',
+                color: '#ffffff',
+                border: 'none',
+                fontSize: '14px',
+                fontWeight: 800,
+                cursor: actionLoading ? 'default' : 'pointer',
+                boxShadow: '0 4px 14px rgba(56, 189, 248, 0.35)',
+                opacity: actionLoading ? 0.7 : 1,
+              }}
+            >
+              <Sparkles size={16} />
+              {actionLoading ? '正在部署采集器...' : '🚀 立即一键启用并部署'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 已开启但尚无数据的提示卡片 */}
+      {isEnabled && !hasData && !loading && (
+        <div
+          style={{
+            ...card,
+            borderStyle: 'dashed',
+            borderColor: 'var(--border-accent)',
+            textAlign: 'center',
+            padding: '36px 20px',
+            backgroundColor: 'rgba(56, 189, 248, 0.03)',
+          }}
+        >
+          <div
+            style={{
+              width: '46px',
+              height: '46px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(34, 197, 94, 0.12)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 12px auto',
+              color: 'var(--accent-emerald)',
+            }}
+          >
+            <CheckCircle2 size={24} />
+          </div>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)' }}>打字统计已就绪，正在后台采集中</div>
+          <div
+            style={{
+              fontSize: '13px',
+              color: 'var(--text-dim)',
+              maxWidth: '560px',
+              margin: '8px auto 16px auto',
+              lineHeight: 1.7,
+            }}
+          >
+            输入法已成功挂载采集组件。现在像往常一样正常打字聊天、写代码或码字，上屏字数将自动累积，稍后点击「刷新」即可在此查看实时图表与热力图。
+          </div>
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--bg-card)',
+              color: 'var(--text-main)',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <RefreshCw size={13} className={loading ? 'spin' : ''} />
+            检查字数更新
+          </button>
+        </div>
+      )}
+
+      {/* KPI 卡片 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '14px' }}>
         <div style={card}>
-          <div style={kpiLabel}>今日</div>
+          <div style={kpiLabel}>今日上屏</div>
           <div style={kpiValue}>
             {fmtNum(today)} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-dim)' }}>字</span>
           </div>
@@ -224,16 +472,19 @@ export function StatsView({ userDir }: StatsViewProps) {
           </div>
         </div>
         <div style={card}>
-          <div style={kpiLabel}>累计</div>
+          <div style={kpiLabel}>累计字数</div>
           <div style={kpiValue}>
             {fmtNum(total)} <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-dim)' }}>字</span>
           </div>
         </div>
       </div>
 
+      {/* 近 30 天柱状图 */}
       <div style={{ ...card, padding: '20px 22px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>近 30 天</div>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Flame size={16} color="var(--accent)" /> 近 30 天打字趋势
+          </div>
           <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
             活跃 {activeDays} 天 · 活跃日日均 {fmtNum(avgActive)} 字
             {bestDay && bestDay.chars > 0 ? ` · 最高单日 ${fmtNum(bestDay.chars)} 字（${bestDay.date}）` : ''}
@@ -275,9 +526,10 @@ export function StatsView({ userDir }: StatsViewProps) {
         </div>
       </div>
 
+      {/* 最近 12 周热力图 */}
       <div style={{ ...card, padding: '20px 22px' }}>
         <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '16px' }}>
-          最近 12 周
+          打字活跃度（最近 12 周）
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '0px' }}>
@@ -320,15 +572,6 @@ export function StatsView({ userDir }: StatsViewProps) {
           <span>多</span>
         </div>
       </div>
-
-      {!hasData && !loading && (
-        <div style={{ ...card, borderStyle: 'dashed', color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.9 }}>
-          <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>还没有统计数据</div>
-          统计模块需要先在输入法里生效：确认{' '}
-          <code>{userDir ? `${userDir.replace(/\\/g, '/')}/lua/input_stats.lua` : 'Rime 用户目录/lua/input_stats.lua'}</code>{' '}
-          存在、方案里挂了 <code>lua_filter@*input_stats</code>，然后部署一次。之后正常打字，字数会自动累计，再回来点「刷新」。
-        </div>
-      )}
     </div>
   );
 }
