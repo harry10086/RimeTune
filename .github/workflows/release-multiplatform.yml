@@ -53,7 +53,7 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    name: Build macOS (Universal DMG: Intel + Apple Silicon)
+    name: 'Build macOS (Universal DMG - Intel + Apple Silicon)'
     runs-on: macos-latest
     steps:
       - name: Checkout repository
