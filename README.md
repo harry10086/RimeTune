@@ -282,6 +282,19 @@ RimeTune/
 
 ## 📦 版本更新日志
 
+### v0.3.2 版本更新摘要
+ * 🛡️ **彻底解决万象拼音选项重启丢失问题 (Issue #3)**：
+   - **杜绝 YAML Duplicate Key 根因**：全面重构方案开关定制逻辑，采用 `BTreeMap<usize, u64>` 严格按索引去重与升序写入 `switches/@{idx}/reset` 补丁，彻底消除 `wanxiang_lite` 等子方案因回退索引撞车产生重复 key 引发 `serde_yaml` 反序列化报错并丢失配置的缺陷；
+   - **动态继承与子方案匹配优化**：针对万象各变体子方案（`wanxiang_lite`, `wanxiang_pro` 等）引入向上继承扫描与精准 fallback 映射表，支持万象拼音多选开关组（如声调显示、简繁转换、生僻字超级提示等）完整解析与无损保存；
+   - **脏配置自动自愈防护**：新增 `clean_duplicate_yaml_keys` 历史 YAML 自动修复过滤器，在读取外部或旧版产生的脏配置文件时自动自愈保留最新值，防止反序列化中断。
+ * 🧠 **修复白霜拼音（rime_frost）Octagram 语法模型保存**：
+   - 补齐白霜拼音专属定制补丁中的语言模型写入逻辑，勾选开启 Octagram 上下文语言模型时自动挂载上下文长句预测配置并自适应默认词模型，重启不再复位。
+ * 🐧 🍎 **全平台（Linux / macOS / Windows）宿主环境与 UI 深度适配**：
+   - **宿主框架精准识别与动态呈现**：仪表盘与状态栏根据运行系统动态识别并呈现实际 Rime 宿主（Linux 显示 **中州韵 (fcitx5-rime / ibus-rime)**，macOS 显示 **鼠须管 (Squirrel)**，Windows 显示 **小狼毫 (Weasel)**），告别原固定显示“小狼毫”的认知困扰；
+   - **用户目录一键直达**：主仪表盘与各设置页增加快捷「打开用户目录」与「打开系统程序目录」交互，方便用户直接查阅或复制方案词库文件；
+   - **特定应用模式 (app_options) 跨平台预设**：应用专属模块根据操作系统自适应推荐预设（Linux 下自动提供 Terminal, bash, zsh, vim, code, alacritty, kitty 等规则；macOS 下自适应 Terminal, iTerm2 等规则；Windows 下保持 cmd, powershell 等规则）；
+   - **外观皮肤系统感知**：外观管理与配置同步模块根据宿主自动匹配 `weasel.custom.yaml`（小狼毫）、`squirrel.custom.yaml`（鼠须管）及系统专属配置，界面文案动态适配。
+
 ### v0.3.1 版本更新摘要
  * 🛡️ **彻底解决皮肤配色 YAML 转义缺陷 (Issue #1)**：
    - **双引号与特殊字符严格转义**：修复上游皮肤 `author` 或 `name` 字段（如薄荷输入法 `Mintimate <"Mintimate's Blog">`）含有双引号时产生非法 YAML 破坏小狼毫配置导致全量失效的严重缺陷；

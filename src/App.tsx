@@ -126,6 +126,11 @@ export function App() {
     } catch (err: any) {
       console.warn('Tauri IPC 加载回退', err);
       const mockEnv: EnvironmentStatus = {
+        platform: 'windows',
+        host_id: 'weasel',
+        host_name: '小狼毫 (Weasel)',
+        host_display_name: '小狼毫',
+        custom_filename: 'weasel.custom.yaml',
         weasel_installed: true,
         weasel_version: '0.17.0',
         weasel_root: 'C:\\Program Files\\Rime\\weasel-0.17.0',
@@ -536,7 +541,7 @@ export function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
             <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: env?.weasel_installed ? '#34d399' : '#f43f5e' }} />
             <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>
-              Weasel {env?.weasel_version || '未就绪'}
+              {env?.host_display_name || 'Rime'} {env?.weasel_version || (env?.weasel_installed ? '已就绪' : '未就绪')}
             </span>
           </div>
           <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -668,6 +673,7 @@ export function App() {
                   presetSchemes={config.preset_schemes}
                   defaultSchemes={defaultSchemes}
                   toggles={config.rime_ice_toggles}
+                  env={env}
                   onChange={(newStyle) => setConfig((prev) => prev ? { ...prev, style: newStyle } : prev)}
                   onSchemeChange={handleSchemeChange}
                 />
@@ -727,6 +733,7 @@ export function App() {
               {activeTab === 'app_rules' && config && (
                 <AppRulesView
                   appOptions={config.app_options}
+                  env={env}
                   onChange={(newOptions) => setConfig({ ...config, app_options: newOptions })}
                 />
               )}
@@ -798,10 +805,10 @@ export function App() {
               <RefreshCw size={28} color="var(--accent)" className="spin" />
             </div>
             <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.3px' }}>
-              小狼毫正在重新部署中
+              {env?.host_display_name ? `${env.host_display_name} 正在重新部署中` : '输入法正在重新部署中'}
             </div>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.6', margin: 0 }}>
-              正在后台调用小狼毫编译输入方案、词典索引与拼音映射。<br />
+              正在后台调用 {env?.host_display_name || '输入法'} 编译输入方案、词典索引与拼音映射。<br />
               通常需要 <strong style={{ color: 'var(--text-main)' }}>3 ~ 10 秒</strong>，请耐心等待完成。<br />
               <span style={{ color: '#fbbf24', fontSize: '12px', fontWeight: 600, display: 'inline-block', marginTop: '6px' }}>
                 ⚡ 部署过程中窗口已安全保护，无需重复点击

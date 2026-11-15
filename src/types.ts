@@ -6,6 +6,11 @@ export interface GrammarModelItem {
 }
 
 export interface EnvironmentStatus {
+  platform: 'windows' | 'macos' | 'linux';
+  host_id: string; // 'weasel' | 'squirrel' | 'fcitx5' | 'ibus' | 'rime'
+  host_name: string; // '小狼毫 (Weasel)' | '鼠须管 (Squirrel)' | 'Fcitx5-Rime' | 'IBus-Rime' | '中州韵 (Rime)'
+  host_display_name: string;
+  custom_filename: string;
   weasel_installed: boolean;
   weasel_version: string;
   weasel_root: string;

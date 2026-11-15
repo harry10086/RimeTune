@@ -761,4 +761,81 @@ author: "Tester"
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_issue_3_wanxiang_lite_and_frost_save_verified() {
+        let temp_dir = std::env::temp_dir().join("weaseltune_test_issue_3");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let u_str = temp_dir.to_str().unwrap();
+
+        // 1. 模拟 wanxiang_lite.schema.yaml 和 default.custom.yaml
+        let wanxiang_content = r#"schema:
+  schema_id: wanxiang_lite
+  name: 万象拼音·无词
+switches:
+  - name: ascii_mode
+    reset: 0
+  - name: ascii_punct
+    reset: 0
+  - name: full_shape
+    reset: 0
+  - options: [ zh_simp, zh_tw, zh_hk ]
+    reset: 0
+  - name: emoji
+    reset: 0
+  - name: super_tips
+    reset: 0
+"#;
+        std::fs::write(temp_dir.join("wanxiang_lite.schema.yaml"), wanxiang_content).unwrap();
+        std::fs::write(temp_dir.join("default.custom.yaml"), "patch:\n  schema_list:\n    - schema: wanxiang_lite\n").unwrap();
+
+        // 2. 加载配置并修改万象拼音选项
+        let mut config = patcher::load_unified_config(u_str);
+        config.rime_ice_toggles.emoji = true;
+        config.rime_ice_toggles.super_tips = true;
+        config.rime_ice_toggles.traditionalization = true;
+        config.rime_ice_toggles.enable_grammar = true;
+        config.fuzzy_pinyin.ian_iang = true;
+
+        // 3. 保存配置
+        let save_res = patcher::save_unified_config(u_str, config);
+        assert!(save_res.is_ok(), "save_unified_config failed: {:?}", save_res);
+
+        // 4. 验证生成的 custom.yaml 不含重复 key，并能再次被 load_unified_config 成功加载
+        let custom_file = temp_dir.join("wanxiang_lite.custom.yaml");
+        assert!(custom_file.exists());
+        let custom_content = std::fs::read_to_string(&custom_file).unwrap();
+        println!("wanxiang_lite.custom.yaml content:\n{}", custom_content);
+
+        let reloaded = patcher::load_unified_config(u_str);
+        assert!(reloaded.rime_ice_toggles.emoji, "emoji should be true");
+        assert!(reloaded.rime_ice_toggles.super_tips, "super_tips should be true");
+        assert!(reloaded.rime_ice_toggles.traditionalization, "traditionalization should be true");
+        assert!(reloaded.fuzzy_pinyin.ian_iang, "ian_iang should be true");
+        assert!(reloaded.rime_ice_toggles.enable_grammar, "enable_grammar should be true");
+
+        // 5. 验证 rime_frost 的语法模型（Octagram）保存与加载
+        let frost_dir = std::env::temp_dir().join("weaseltune_test_issue_3_frost");
+        let _ = std::fs::remove_dir_all(&frost_dir);
+        let _ = std::fs::create_dir_all(&frost_dir);
+        let f_str = frost_dir.to_str().unwrap();
+
+        std::fs::write(frost_dir.join("rime_frost.schema.yaml"), "schema:\n  schema_id: rime_frost\n").unwrap();
+        std::fs::write(frost_dir.join("default.custom.yaml"), "patch:\n  schema_list:\n    - schema: rime_frost\n").unwrap();
+
+        let mut frost_cfg = patcher::load_unified_config(f_str);
+        frost_cfg.rime_ice_toggles.enable_grammar = true;
+        let frost_save = patcher::save_unified_config(f_str, frost_cfg);
+        assert!(frost_save.is_ok());
+
+        let frost_custom = std::fs::read_to_string(frost_dir.join("rime_frost.custom.yaml")).unwrap();
+        assert!(frost_custom.contains(r#""grammar/language": "zh-hans-t-essay-bgw""#));
+
+        let frost_reloaded = patcher::load_unified_config(f_str);
+        assert!(frost_reloaded.rime_ice_toggles.enable_grammar, "rime_frost enable_grammar should reload as true");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::remove_dir_all(&frost_dir);
+    }
 }

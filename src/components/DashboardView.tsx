@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { EnvironmentStatus, DeployResult } from '../types';
-import { CheckCircle2, AlertTriangle, RefreshCw, Folder, Cpu, Sparkles, BookOpen } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, RefreshCw, Folder, Cpu, Sparkles, BookOpen, FolderOpen } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface DashboardViewProps {
   env: EnvironmentStatus | null;
@@ -21,6 +22,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   lastDeployResult,
   onNavigate,
 }) => {
+  const [openingDir, setOpeningDir] = useState(false);
+
+  const handleOpenDir = async () => {
+    if (!env?.rime_user_dir) return;
+    try {
+      setOpeningDir(true);
+      await invoke('open_in_explorer', { path: env.rime_user_dir });
+    } catch (err) {
+      console.error('打开用户目录失败:', err);
+    } finally {
+      setTimeout(() => setOpeningDir(false), 500);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
       {/* 顶部主横幅 Banner */}
@@ -37,7 +52,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
               <span style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.3px' }}>
-                小狼毫配置中心
+                {env?.host_display_name ? `${env.host_display_name}配置中心` : 'Rime 配置中心'}
               </span>
               <span
                 style={{
@@ -54,7 +69,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
             </div>
             <p style={{ color: 'var(--text-muted)', fontSize: '14px', maxWidth: '680px', lineHeight: '1.6' }}>
-              安全同步小狼毫原生补丁（<span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>*.custom.yaml</span>）。不修改底层文件，升级词库防覆盖；修改后一键静默重新部署，无需右键托盘！
+              安全同步 {env?.host_display_name || 'Rime'} 原生补丁（<span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>*.custom.yaml</span>）。不修改底层文件，升级词库防覆盖；修改后一键静默重新部署，无需手动重启输入法！
             </p>
           </div>
 
@@ -76,7 +91,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 cursor: loading ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s',
               }}
-              title="重新检测小狼毫安装与用户环境"
+              title={`重新检测 ${env?.host_display_name || 'Rime'} 安装与用户环境`}
             >
               <RefreshCw size={15} className={loading ? 'spin' : ''} />
               重新检测
@@ -129,7 +144,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* 状态诊断卡片网格 (高对比度、清晰字体) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
-        {/* 小狼毫本体 */}
+        {/* 输入法宿主 */}
         <div
           className="glass-panel glow-card"
           style={{ padding: '20px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}
@@ -137,7 +152,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-dim)', fontSize: '13px', fontWeight: 600 }}>
               <Cpu size={18} color="#38bdf8" />
-              <span>小狼毫 (Weasel)</span>
+              <span>{env?.host_name || '中州韵 (Rime)'}</span>
             </div>
             {env?.weasel_installed ? (
               <span style={{ color: '#34d399', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -150,10 +165,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             )}
           </div>
           <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-main)' }}>
-            版本: {env?.weasel_version || '0.17.x'}
+            版本: {env?.weasel_version || (env?.weasel_installed ? '已就绪' : '未就绪')}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-dim)', wordBreak: 'break-all' }} className="mono">
-            {env?.weasel_root || '未识别'}
+            {env?.weasel_root || env?.deployer_path || '系统默认路径'}
           </div>
         </div>
 
@@ -193,8 +208,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {env?.patch_files_found.length || 0} 个有效补丁
             </span>
           </div>
-          <div style={{ fontSize: '13px', color: 'var(--text-muted)', wordBreak: 'break-all' }} className="mono">
-            {env?.rime_user_dir}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)', wordBreak: 'break-all', flex: 1 }} className="mono">
+              {env?.rime_user_dir}
+            </div>
+            <button
+              onClick={handleOpenDir}
+              disabled={openingDir || !env?.rime_user_dir}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 600,
+                backgroundColor: 'rgba(192, 132, 252, 0.15)',
+                color: '#c084fc',
+                border: '1px solid rgba(192, 132, 252, 0.3)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s',
+              }}
+              title="在系统文件管理器中直接打开 Rime 用户目录（方便复制方案或词典文件）"
+            >
+              <FolderOpen size={14} />
+              {openingDir ? '正在打开...' : '打开目录'}
+            </button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
             {env?.patch_files_found.map((p) => (

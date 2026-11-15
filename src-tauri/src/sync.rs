@@ -82,7 +82,7 @@ pub fn trigger_rime_sync(custom_deployer: Option<String>) -> DeployResult {
     crate::deployer::run_weasel_command(
         "/sync",
         custom_deployer,
-        "词库与配置同步指令已成功发送，小狼毫正在同步词库与配置！",
+        "词库与配置同步指令已成功发送，输入法正在同步词库与配置！",
     )
 }
 

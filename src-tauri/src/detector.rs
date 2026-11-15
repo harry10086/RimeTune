@@ -16,6 +16,11 @@ pub struct GrammarModelItem {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EnvironmentStatus {
+    pub platform: String,
+    pub host_id: String,
+    pub host_name: String,
+    pub host_display_name: String,
+    pub custom_filename: String,
     pub weasel_installed: bool,
     pub weasel_version: String,
     pub weasel_root: String,
@@ -100,12 +105,17 @@ pub fn detect_weasel_paths() -> (Option<String>, Option<String>, Option<String>)
                 PathBuf::from(&home).join(".local/share/fcitx5/rime"),
                 PathBuf::from(&home).join(".config/fcitx5/rime"),
                 PathBuf::from(&home).join(".config/ibus/rime"),
+                PathBuf::from(&home).join(".local/share/rime"),
+                PathBuf::from(&home).join(".config/rime"),
             ];
             for c in &candidates {
                 if c.exists() {
                     user_dir = Some(c.to_string_lossy().to_string());
                     break;
                 }
+            }
+            if user_dir.is_none() {
+                user_dir = Some(PathBuf::from(&home).join(".local/share/fcitx5/rime").to_string_lossy().to_string());
             }
         }
     }
@@ -176,10 +186,96 @@ pub fn inspect_environment() -> EnvironmentStatus {
     let weasel_root = weasel_root_opt.unwrap_or_default();
     let deployer_path = deployer_opt.unwrap_or_default();
     let rime_user_dir = user_dir_opt.unwrap_or_else(|| {
-        std::env::var("APPDATA")
-            .map(|a| PathBuf::from(a).join("Rime").to_string_lossy().to_string())
-            .unwrap_or_default()
+        #[cfg(windows)]
+        {
+            std::env::var("APPDATA")
+                .map(|a| PathBuf::from(a).join("Rime").to_string_lossy().to_string())
+                .unwrap_or_default()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join("Library/Rime").to_string_lossy().to_string())
+                .unwrap_or_default()
+        }
+        #[cfg(target_os = "linux")]
+        {
+            std::env::var("HOME")
+                .map(|h| PathBuf::from(h).join(".local/share/fcitx5/rime").to_string_lossy().to_string())
+                .unwrap_or_default()
+        }
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+        {
+            String::new()
+        }
     });
+
+    #[cfg(windows)]
+    let platform = "windows".to_string();
+    #[cfg(target_os = "macos")]
+    let platform = "macos".to_string();
+    #[cfg(target_os = "linux")]
+    let platform = "linux".to_string();
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    let platform = "unknown".to_string();
+
+    #[cfg(windows)]
+    let (host_id, host_name, host_display_name, custom_filename) = (
+        "weasel".to_string(),
+        "小狼毫 (Weasel)".to_string(),
+        "小狼毫".to_string(),
+        "weasel.custom.yaml".to_string(),
+    );
+
+    #[cfg(target_os = "macos")]
+    let (host_id, host_name, host_display_name, custom_filename) = (
+        "squirrel".to_string(),
+        "鼠须管 (Squirrel)".to_string(),
+        "鼠须管".to_string(),
+        "squirrel.custom.yaml".to_string(),
+    );
+
+    #[cfg(target_os = "linux")]
+    let (host_id, host_name, host_display_name, custom_filename) = {
+        let is_fcitx5 = rime_user_dir.contains("fcitx5")
+            || deployer_path.contains("fcitx5")
+            || Path::new("/usr/bin/fcitx5").exists()
+            || Path::new("/usr/bin/fcitx5-remote").exists();
+        let is_ibus = rime_user_dir.contains("ibus")
+            || deployer_path.contains("ibus")
+            || Path::new("/usr/bin/ibus").exists();
+
+        if is_fcitx5 {
+            (
+                "fcitx5".to_string(),
+                "Fcitx5-Rime".to_string(),
+                "Fcitx5-Rime".to_string(),
+                "default.custom.yaml".to_string(),
+            )
+        } else if is_ibus {
+            (
+                "ibus".to_string(),
+                "IBus-Rime".to_string(),
+                "IBus-Rime".to_string(),
+                "default.custom.yaml".to_string(),
+            )
+        } else {
+            (
+                "rime".to_string(),
+                "中州韵 (Rime)".to_string(),
+                "中州韵".to_string(),
+                "default.custom.yaml".to_string(),
+            )
+        }
+    };
+
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    let (host_id, host_name, host_display_name, custom_filename) = (
+        "rime".to_string(),
+        "中州韵 (Rime)".to_string(),
+        "中州韵".to_string(),
+        "default.custom.yaml".to_string(),
+    );
 
     let mut weasel_version = String::new();
     if !weasel_root.is_empty() {
@@ -192,7 +288,18 @@ pub fn inspect_environment() -> EnvironmentStatus {
         }
     }
     if weasel_version.is_empty() && weasel_installed {
-        weasel_version = "0.17.x".to_string();
+        #[cfg(windows)]
+        {
+            weasel_version = "0.17.x".to_string();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            weasel_version = "Squirrel".to_string();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            weasel_version = host_display_name.clone();
+        }
     }
 
     let user_path = Path::new(&rime_user_dir);
@@ -356,6 +463,11 @@ pub fn inspect_environment() -> EnvironmentStatus {
     let available_grammar_models = scan_grammar_models(&user_path);
 
     EnvironmentStatus {
+        platform,
+        host_id,
+        host_name,
+        host_display_name,
+        custom_filename,
         weasel_installed,
         weasel_version,
         weasel_root,

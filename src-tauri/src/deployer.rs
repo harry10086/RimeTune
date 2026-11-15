@@ -34,7 +34,7 @@ pub fn run_weasel_command(
     {
         return DeployResult {
             success: false,
-            message: "小狼毫部署程序正在后台执行中，请耐心等待完成，请勿频繁重复点击！".to_string(),
+            message: "输入法部署程序正在后台执行中，请耐心等待完成，请勿频繁重复点击！".to_string(),
             deployer_used: String::new(),
         };
     }
@@ -56,7 +56,7 @@ pub fn run_weasel_command(
     if deployer_path.is_empty() || !std::path::Path::new(&deployer_path).exists() {
         return DeployResult {
             success: false,
-            message: "未找到 WeaselDeployer.exe 部署程序，请检查小狼毫安装路径".to_string(),
+            message: "未找到输入法部署程序（WeaselDeployer/Squirrel/rime_deployer/fcitx5-remote），请检查输入法安装路径".to_string(),
             deployer_used: String::new(),
         };
     }
@@ -93,7 +93,7 @@ pub fn run_weasel_command(
                     let _ = child.kill();
                     return DeployResult {
                         success: false,
-                        message: "小狼毫部署超时（已等待超过 45 秒）。可能因输入法文件被某些程序独占占用，已自动停止等待。".to_string(),
+                        message: "输入法部署超时（已等待超过 45 秒）。可能因词库或配置正在被独占占用，已自动停止等待。".to_string(),
                         deployer_used: deployer_path,
                     };
                 }
@@ -128,6 +128,6 @@ pub fn trigger_deploy(custom_deployer: Option<String>) -> DeployResult {
     run_weasel_command(
         "/deploy",
         custom_deployer,
-        "重新部署指令已成功发送给小狼毫，配置与词库已刷新！",
+        "重新部署指令已成功发送给输入法，配置与词库已刷新！",
     )
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ColorSchemeItem, WeaselStyleConfig, RimeIceToggles } from '../types';
+import { ColorSchemeItem, WeaselStyleConfig, RimeIceToggles, EnvironmentStatus } from '../types';
 import { CandidatePreview } from './CandidatePreview';
 import {
   Palette,
@@ -30,6 +30,7 @@ interface AppearanceViewProps {
   presetSchemes: ColorSchemeItem[];
   defaultSchemes?: ColorSchemeItem[];
   toggles?: RimeIceToggles;
+  env?: EnvironmentStatus | null;
   onChange: (newStyle: WeaselStyleConfig) => void;
   onSchemeChange: (updatedScheme: ColorSchemeItem) => void;
 }
@@ -39,6 +40,7 @@ export const AppearanceView: React.FC<AppearanceViewProps> = ({
   presetSchemes,
   defaultSchemes = [],
   toggles,
+  env,
   onChange,
   onSchemeChange,
 }) => {
@@ -302,7 +304,7 @@ hilited_candidate_label_color: 0xFFD9F99D`;
       }
     };
 
-    let yaml = `# Rime Weasel 皮肤配色方案: ${scheme.name}\n`;
+    let yaml = `# Rime 皮肤配色方案: ${scheme.name}\n`;
     yaml += `preset_color_schemes:\n`;
     yaml += `  ${sid}:\n`;
     yaml += `    name: "${scheme.name}"\n`;
@@ -375,7 +377,7 @@ hilited_candidate_label_color: 0xFFD9F99D`;
           type="text"
           value={testInputText}
           onChange={(e) => setTestInputText(e.target.value)}
-          placeholder="在此处直接打字测试小狼毫候选框外观、中英文切换及 Caps Lock 效果..."
+          placeholder="在此处直接打字测试输入法候选框外观、中英文切换及 Caps Lock 效果..."
           style={{
             flex: 1,
             padding: '9px 14px',
@@ -785,7 +787,7 @@ hilited_candidate_label_color: 0xFFD9F99D`;
               </div>
 
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                💡 <strong>提示：</strong>通常只需选择<strong>单个主字体</strong>（直接点击下方字体卡片即可一键切换）。小狼毫亦高级支持用逗号分隔的中西文回退链（如 <span className="mono" style={{ color: '#38bdf8' }}>Segoe UI, Microsoft YaHei UI</span>）。
+                💡 <strong>提示：</strong>通常只需选择<strong>单个主字体</strong>（直接点击下方字体卡片即可一键切换）。Rime 各宿主端（如小狼毫、鼠须管）亦高级支持用逗号分隔的中西文回退链（如 <span className="mono" style={{ color: '#38bdf8' }}>Segoe UI, Microsoft YaHei UI</span>）。
               </div>
             </div>
 
@@ -949,7 +951,7 @@ hilited_candidate_label_color: 0xFFD9F99D`;
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>拼音 / 释义字号 (comment_font_point)</span>
                 <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', fontWeight: 600 }}>
-                  小狼毫原生
+                  系统原生
                 </span>
               </div>
               <span style={{ fontSize: '14px', color: '#38bdf8', fontWeight: 700 }}>{styleConfig.comment_font_point ?? 12} pt</span>
@@ -1228,7 +1230,7 @@ hilited_candidate_label_color: 0xFFD9F99D`;
                 <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '3px' }}>
                   {styleConfig.inline_preedit
                     ? '输入中的拼音编码（如 wusong）直接内嵌在宿主程序光标处，候选框仅呈现候选词列表'
-                    : '宿主程序光标处不插入字母，小狼毫浮窗顶部常驻显示正在输入的拼音编码'}
+                    : '宿主程序光标处不插入字母，候选框浮窗顶部常驻显示正在输入的拼音编码'}
                 </div>
               </div>
               <label className="toggle-switch">
@@ -1271,44 +1273,58 @@ hilited_candidate_label_color: 0xFFD9F99D`;
           </div>
         </div>
 
-        {/* 小狼毫 Windows 系统级交互与通知选项 */}
+        {/* 系统级交互与集成选项 */}
         <div className="glass-panel glow-card" style={{ padding: '22px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
             <Monitor size={18} color="#38bdf8" />
-            <span>小狼毫 Windows 系统与交互集成</span>
+            <span>
+              {env?.platform === 'windows'
+                ? 'Windows 系统与交互集成（小狼毫专属）'
+                : env?.platform === 'macos'
+                ? 'macOS 系统与交互集成（鼠须管）'
+                : '桌面系统与交互集成'}
+            </span>
           </div>
 
-          {/* 切换中英悬浮通知 */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>中英文切换悬浮通知 (show_notifications)</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>按快捷键切换中英文输入时，在屏幕右下角弹出 Windows 状态提示框</div>
+          {env?.platform === 'linux' ? (
+            <div style={{ fontSize: '13px', color: 'var(--text-dim)', lineHeight: '1.6' }}>
+              💡 <strong>Linux 平台提示：</strong>在 Linux 下（如 Fcitx5 / IBus），托盘图标、全局中英文状态切换与通知弹窗主要由系统桌面环境（GNOME / KDE / XFCE）及输入法框架原生管理，无需额外注入 Windows 钩子。
             </div>
-            <label className="toggle-switch">
-              <input
-                type="checkbox"
-                checked={styleConfig.show_notifications ?? true}
-                onChange={(e) => updateStyle({ show_notifications: e.target.checked })}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
+          ) : (
+            <>
+              {/* 切换中英悬浮通知 */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>中英文切换悬浮通知 (show_notifications)</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>按快捷键切换中英文输入时，在屏幕右下角弹出状态提示框</div>
+                </div>
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={styleConfig.show_notifications ?? true}
+                    onChange={(e) => updateStyle({ show_notifications: e.target.checked })}
+                  />
+                  <span className="slider"></span>
+                </label>
+              </div>
 
-          {/* 全局中英文状态同步 */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>全局中英文状态同步 (global_ascii)</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>开启后所有程序共用同一输入状态；关闭则各程序独立记忆中英文模式</div>
-            </div>
-            <label className="toggle-switch">
-              <input
-                type="checkbox"
-                checked={styleConfig.global_ascii ?? false}
-                onChange={(e) => updateStyle({ global_ascii: e.target.checked })}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
+              {/* 全局中英文状态同步 */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>全局中英文状态同步 (global_ascii)</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>开启后所有程序共用同一输入状态；关闭则各程序独立记忆中英文模式</div>
+                </div>
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={styleConfig.global_ascii ?? false}
+                    onChange={(e) => updateStyle({ global_ascii: e.target.checked })}
+                  />
+                  <span className="slider"></span>
+                </label>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1377,7 +1393,7 @@ hilited_candidate_label_color: 0xFFD9F99D`;
                     新建 / 导入皮肤方案
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
-                    支持直接粘贴 Rime Weasel 皮肤 YAML 代码，或通过可视化界面调色
+                    支持直接粘贴 Rime 皮肤 YAML 代码，或通过可视化界面调色
                   </div>
                 </div>
               </div>
@@ -1907,7 +1923,7 @@ hilited_candidate_back_color: 0xFF4D7C0F
             {/* 弹窗内容 */}
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                以下是当前选中的皮肤【<strong>{currentScheme.name}</strong>】的标准 YAML 配置代码（包含 <code>color_format: {currentScheme.color_format || 'argb'}</code> 与完整色值定义）。您可以直接复制并粘贴到 <code>weasel.custom.yaml</code> 的 <code>preset_color_schemes</code> 块中，或分享给其他小狼毫用户。
+                以下是当前选中的皮肤【<strong>{currentScheme.name}</strong>】的标准 YAML 配置代码（包含 <code>color_format: {currentScheme.color_format || 'argb'}</code> 与完整色值定义）。您可以直接复制并粘贴到 <code>{env?.custom_filename || 'weasel.custom.yaml'}</code> 的 <code>preset_color_schemes</code> 块中，或分享给其他 Rime 用户。
               </div>
 
               <textarea

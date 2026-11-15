@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { AppOptionItem } from '../types';
+import { AppOptionItem, EnvironmentStatus } from '../types';
 import { Monitor, Plus, Trash2, Shield, CheckSquare } from 'lucide-react';
 
 interface AppRulesViewProps {
   appOptions: AppOptionItem[];
+  env?: EnvironmentStatus | null;
   onChange: (options: AppOptionItem[]) => void;
 }
 
 export const AppRulesView: React.FC<AppRulesViewProps> = ({
   appOptions,
+  env,
   onChange,
 }) => {
   const [newAppName, setNewAppName] = useState('');
@@ -18,7 +20,8 @@ export const AppRulesView: React.FC<AppRulesViewProps> = ({
   const handleAdd = () => {
     let name = newAppName.trim();
     if (!name) return;
-    if (!name.toLowerCase().endsWith('.exe')) {
+    // 仅在 Windows 且不含任何后缀时自动补全 .exe
+    if (env?.platform === 'windows' && !name.includes('.')) {
       name += '.exe';
     }
     if (appOptions.some((a) => a.app_name.toLowerCase() === name.toLowerCase())) {
@@ -63,20 +66,44 @@ export const AppRulesView: React.FC<AppRulesViewProps> = ({
   };
 
   const handleClearAll = () => {
-    if (confirm('确定要清空所有应用程序的专属规则吗？清空后所有应用将遵循小狼毫全局设置。')) {
+    if (confirm('确定要清空所有应用程序的专属规则吗？清空后所有应用将遵循输入法全局设置。')) {
       onChange([]);
     }
   };
 
-  const quickPresets = [
-    { name: 'cmd.exe', label: 'CMD' },
-    { name: 'powershell.exe', label: 'PowerShell' },
-    { name: 'windowsterminal.exe', label: 'Windows Terminal' },
-    { name: 'code.exe', label: 'VS Code' },
-    { name: 'chrome.exe', label: 'Chrome' },
-    { name: 'firefox.exe', label: 'Firefox' },
-    { name: 'nvim-qt.exe', label: 'Neovim' },
-  ];
+  const presetsByPlatform = {
+    windows: [
+      { name: 'cmd.exe', label: 'CMD' },
+      { name: 'powershell.exe', label: 'PowerShell' },
+      { name: 'windowsterminal.exe', label: 'Windows Terminal' },
+      { name: 'code.exe', label: 'VS Code' },
+      { name: 'chrome.exe', label: 'Chrome' },
+      { name: 'firefox.exe', label: 'Firefox' },
+      { name: 'nvim-qt.exe', label: 'Neovim' },
+    ],
+    linux: [
+      { name: 'gnome-terminal', label: 'GNOME 终端' },
+      { name: 'kitty', label: 'Kitty' },
+      { name: 'alacritty', label: 'Alacritty' },
+      { name: 'konsole', label: 'Konsole' },
+      { name: 'xterm', label: 'XTerm' },
+      { name: 'code', label: 'VS Code' },
+      { name: 'google-chrome', label: 'Chrome' },
+      { name: 'firefox', label: 'Firefox' },
+      { name: 'nvim', label: 'Neovim' },
+    ],
+    macos: [
+      { name: 'com.apple.Terminal', label: 'Terminal 终端' },
+      { name: 'com.googlecode.iterm2', label: 'iTerm2' },
+      { name: 'alacritty', label: 'Alacritty' },
+      { name: 'com.microsoft.VSCode', label: 'VS Code' },
+      { name: 'com.google.Chrome', label: 'Chrome' },
+      { name: 'org.vim.MacVim', label: 'MacVim' },
+    ],
+  };
+
+  const currentPlatformKey = env?.platform || 'windows';
+  const quickPresets = presetsByPlatform[currentPlatformKey] || presetsByPlatform.windows;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
@@ -106,7 +133,13 @@ export const AppRulesView: React.FC<AppRulesViewProps> = ({
           <div style={{ flex: 1, minWidth: '240px' }}>
             <input
               type="text"
-              placeholder="输入应用程序名 (如: wt.exe 或 mintty.exe)"
+              placeholder={
+                env?.platform === 'linux'
+                  ? '输入进程名 (如: gnome-terminal, kitty, alacritty, code)'
+                  : env?.platform === 'macos'
+                  ? '输入 Bundle ID 或程序名 (如: com.apple.Terminal, com.microsoft.VSCode)'
+                  : '输入应用程序名 (如: wt.exe, powershell.exe, code.exe)'
+              }
               value={newAppName}
               onChange={(e) => setNewAppName(e.target.value)}
               onKeyDown={(e) => {
@@ -165,7 +198,13 @@ export const AppRulesView: React.FC<AppRulesViewProps> = ({
 
         {/* 快速推荐按钮 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
-          <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>快速填入常用应用:</span>
+          <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+            {env?.platform === 'linux'
+              ? '快速填入 Linux 常用应用:'
+              : env?.platform === 'macos'
+              ? '快速填入 macOS 常用应用:'
+              : '快速填入 Windows 常用应用:'}
+          </span>
           {quickPresets.map((p) => {
             const exists = appOptions.some((a) => a.app_name.toLowerCase() === p.name.toLowerCase());
             return (
