@@ -2633,8 +2633,15 @@ pub fn detect_switch_reset(val: &serde_yaml::Value, switch_name: &str) -> Option
     None
 }
 
-/// 解析指定方案 schema 中的 switches 列表，找到与目标开关名称匹配的真实数字索引
-pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_name: &str) -> Option<usize> {
+#[derive(Clone, Debug)]
+pub struct SwitchDetail {
+    pub index: usize,
+    pub actual_name: String,
+    pub is_simplification_reversed: bool,
+}
+
+/// 解析指定方案 schema 中的 switches 列表，找到与目标开关名称匹配的真实数字索引及极性信息
+pub fn resolve_switch_detail_for_schema(user_dir: &str, schema_id: &str, switch_name: &str) -> Option<SwitchDetail> {
     let u_path = Path::new(user_dir);
     let mut candidate_paths = vec![
         u_path.join(format!("{}.schema.yaml", schema_id)),
@@ -2682,37 +2689,41 @@ pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_n
                     for (idx, item) in switches.iter().enumerate() {
                         if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
                             if name == switch_name {
-                                return Some(idx);
+                                let is_reversed = switch_name == "traditionalization" && (name == "simplification" || name == "zh_simp");
+                                return Some(SwitchDetail { index: idx, actual_name: name.to_string(), is_simplification_reversed: is_reversed });
                             }
                             if switch_name == "traditionalization" && (name == "transcription" || name == "traditionalize" || name == "zh_simp" || name == "simplification") {
-                                return Some(idx);
+                                let is_reversed = name == "simplification" || name == "zh_simp";
+                                return Some(SwitchDetail { index: idx, actual_name: name.to_string(), is_simplification_reversed: is_reversed });
                             }
                             if switch_name == "emoji" && (name == "emoji_suggestion") {
-                                return Some(idx);
+                                return Some(SwitchDetail { index: idx, actual_name: name.to_string(), is_simplification_reversed: false });
                             }
                             if (switch_name == "chinese_english" || switch_name == "english_chinese")
                                 && (name == "english_chinese" || name == "chinese_english")
                             {
-                                return Some(idx);
+                                return Some(SwitchDetail { index: idx, actual_name: name.to_string(), is_simplification_reversed: false });
                             }
                             if switch_name == "search_single_char" && (name == "char_priority") {
-                                return Some(idx);
+                                return Some(SwitchDetail { index: idx, actual_name: name.to_string(), is_simplification_reversed: false });
                             }
                         }
                         if let Some(options) = item.get("options").and_then(|o| o.as_sequence()) {
                             for opt in options {
                                 if let Some(opt_str) = opt.as_str() {
                                     if opt_str == switch_name {
-                                        return Some(idx);
+                                        let is_reversed = switch_name == "traditionalization" && (opt_str == "simplification" || opt_str == "zh_simp");
+                                        return Some(SwitchDetail { index: idx, actual_name: opt_str.to_string(), is_simplification_reversed: is_reversed });
                                     }
                                     if switch_name == "traditionalization" && (opt_str == "s2t" || opt_str == "s2s" || opt_str == "zh_simp" || opt_str == "zh_trad") {
-                                        return Some(idx);
+                                        let is_reversed = opt_str == "zh_simp" || opt_str == "simplification";
+                                        return Some(SwitchDetail { index: idx, actual_name: opt_str.to_string(), is_simplification_reversed: is_reversed });
                                     }
                                     if switch_name == "tone_display" && opt_str == "tone_display" {
-                                        return Some(idx);
+                                        return Some(SwitchDetail { index: idx, actual_name: opt_str.to_string(), is_simplification_reversed: false });
                                     }
                                     if (switch_name == "tone_hint" || switch_name == "spelling_hints") && (opt_str == "tone_hint" || opt_str == "comment_off" || opt_str == "toneless_hint") {
-                                        return Some(idx);
+                                        return Some(SwitchDetail { index: idx, actual_name: opt_str.to_string(), is_simplification_reversed: false });
                                     }
                                 }
                             }
@@ -2724,7 +2735,7 @@ pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_n
     }
 
     // 内置主流方案已知标准索引 Fallback（精确针对各个子方案）
-    match schema_id {
+    let idx = match schema_id {
         "rime_ice" => match switch_name {
             "ascii_punct" => Some(1),
             "traditionalization" => Some(2),
@@ -2793,7 +2804,18 @@ pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_n
             _ => None,
         },
         _ => None,
-    }
+    };
+
+    idx.map(|i| SwitchDetail {
+        index: i,
+        actual_name: switch_name.to_string(),
+        is_simplification_reversed: false,
+    })
+}
+
+/// 解析指定方案 schema 中的 switches 列表，找到与目标开关名称匹配的真实数字索引
+pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_name: &str) -> Option<usize> {
+    resolve_switch_detail_for_schema(user_dir, schema_id, switch_name).map(|d| d.index)
 }
 
 pub fn detect_schema_switch_state(
@@ -2806,8 +2828,8 @@ pub fn detect_schema_switch_state(
         if let Some(b) = detect_switch_reset(val, name) {
             return Some(b);
         }
-        if let Some(idx) = resolve_switch_index_for_schema(user_dir, schema_id, name) {
-            let key = format!("switches/@{}/reset", idx);
+        if let Some(detail) = resolve_switch_detail_for_schema(user_dir, schema_id, name) {
+            let key = format!("switches/@{}/reset", detail.index);
             if let Some(p) = val.get("patch").or(Some(val)) {
                 if let Some(v) = p.get(&key) {
                     let num_val = if let Some(u) = v.as_u64() {
@@ -2821,6 +2843,11 @@ pub fn detect_schema_switch_state(
                     };
 
                     if let Some(u) = num_val {
+                        if detail.is_simplification_reversed {
+                            // 针对原生方案的 simplification/zh_simp 开关：1 为开启简化（输出简体），0 为关闭简化（输出繁体）
+                            // 故 traditionalization 值为 true (繁体) 当且仅当 u == 0
+                            return Some(u == 0);
+                        }
                         if schema_id.starts_with("wanxiang") {
                             if switch_names.contains(&"tone_display") {
                                 return Some(u == 1);
@@ -3411,6 +3438,10 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                         }
                     }
 
+                    if let Some(b) = patch.get("style/horizontal").and_then(|v| v.as_bool()) { style.horizontal = b; }
+                    if let Some(s) = patch.get("style/font_face").and_then(|v| v.as_str()) { style.font_face = s.to_string(); }
+                    if let Some(u) = patch.get("style/font_point").and_then(|v| v.as_u64()) { style.font_point = u as u32; }
+
                     // 支持从 default.custom.yaml 中读取 app_options (Linux / 全局配置规范)
                     if let Some(patch_map) = patch.as_mapping() {
                         let mut default_app_map: std::collections::BTreeMap<String, (bool, bool)> = std::collections::BTreeMap::new();
@@ -3732,6 +3763,36 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
     let dict_files = scan_installed_dicts(user_dir);
     let custom_dicts = scan_custom_dicts(user_dir);
 
+    // 在 Linux 环境下，若存在 Fcitx5 classicui.conf，以系统框架实际生效的横竖排与字体为准
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let classicui_file = PathBuf::from(&home).join(".config").join("fcitx5").join("conf").join("classicui.conf");
+            if classicui_file.exists() {
+                if let Ok(c) = fs::read_to_string(&classicui_file) {
+                    for line in c.lines() {
+                        let trimmed = line.trim();
+                        if let Some(val) = trimmed.strip_prefix("Vertical Candidate List=") {
+                            style.horizontal = val.trim().eq_ignore_ascii_case("false");
+                        } else if let Some(val) = trimmed.strip_prefix("Font=") {
+                            let font_val = val.trim().trim_matches('"');
+                            if let Some((face, pt)) = font_val.rsplit_once(' ') {
+                                if let Ok(pt_num) = pt.parse::<u32>() {
+                                    style.font_point = pt_num;
+                                    style.font_face = face.to_string();
+                                } else {
+                                    style.font_face = font_val.to_string();
+                                }
+                            } else {
+                                style.font_face = font_val.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     UnifiedFullConfig {
         style,
         preset_schemes,
@@ -3953,9 +4014,24 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     default_yaml.push_str(&format!("  \"switches/@name/full_shape/reset\": {}\n", if config.rime_ice_toggles.full_shape { 1 } else { 0 }));
     default_yaml.push_str(&format!("  \"switches/@name/ascii_punct/reset\": {}\n", if config.rime_ice_toggles.ascii_punct { 1 } else { 0 }));
 
+    if is_linux {
+        default_yaml.push_str("\n  # 界面布局与字体 (Linux 规范)\n");
+        default_yaml.push_str(&format!("  \"style/horizontal\": {}\n", config.style.horizontal));
+        if !config.style.font_face.trim().is_empty() {
+            default_yaml.push_str(&format!("  \"style/font_face\": \"{}\"\n", yaml_escape_str(&config.style.font_face)));
+        }
+        if config.style.font_point > 0 {
+            default_yaml.push_str(&format!("  \"style/font_point\": {}\n", config.style.font_point));
+        }
+    }
+
     validate_yaml(&default_yaml, "default.custom.yaml")?;
     fs::write(u_path.join("default.custom.yaml"), default_yaml)
         .map_err(|e| format!("写入 default.custom.yaml 失败: {}", e))?;
+
+    if is_linux {
+        let _ = sync_fcitx5_classicui(&config.style);
+    }
 
     // 3. 通用补丁片段准备：模糊音与翻页按键多选绑定
     let mut fuzzy_rules = Vec::new();
@@ -4556,5 +4632,48 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     }
 
+    Ok(())
+}
+
+/// Linux 环境下将界面的横竖排与字体设置同步至 Fcitx5 的 classicui.conf
+pub fn sync_fcitx5_classicui(style: &WeaselStyleConfig) -> Result<(), String> {
+    if let Ok(home) = std::env::var("HOME") {
+        let config_dir = PathBuf::from(&home).join(".config").join("fcitx5").join("conf");
+        let classicui_file = config_dir.join("classicui.conf");
+        let _ = fs::create_dir_all(&config_dir);
+
+        let mut lines = Vec::new();
+        if classicui_file.exists() {
+            if let Ok(content) = fs::read_to_string(&classicui_file) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("Vertical Candidate List=")
+                        || trimmed.starts_with("Font=")
+                        || trimmed.starts_with("PerScreenDPI=")
+                        || trimmed.starts_with("WheelForPaging=")
+                    {
+                        continue;
+                    }
+                    lines.push(line.to_string());
+                }
+            }
+        }
+
+        lines.push(format!("Vertical Candidate List={}", if style.horizontal { "False" } else { "True" }));
+        lines.push("PerScreenDPI=True".to_string());
+        lines.push("WheelForPaging=True".to_string());
+        if !style.font_face.trim().is_empty() {
+            let pt = if style.font_point > 0 { style.font_point } else { 12 };
+            lines.push(format!("Font=\"{} {}\"", style.font_face.trim(), pt));
+        }
+
+        let new_content = lines.join("\n") + "\n";
+        let _ = fs::write(&classicui_file, new_content);
+
+        // 调用 D-Bus 通知 Fcitx5 重新加载 UI 配置
+        let _ = std::process::Command::new("busctl")
+            .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "ReloadConfig"])
+            .output();
+    }
     Ok(())
 }

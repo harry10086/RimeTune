@@ -426,6 +426,12 @@ hilited_candidate_label_color: 0xFFD9F99D`;
             </span>
           </div>
 
+          {env?.platform === 'linux' && (
+            <div style={{ fontSize: '12px', color: '#fbbf24', backgroundColor: 'rgba(251, 191, 36, 0.1)', padding: '10px 14px', borderRadius: '8px', lineHeight: '1.5' }}>
+              💡 <strong>Linux 皮肤说明：</strong>在 Linux（Fcitx5 / IBus）中，候选窗体由输入法框架与系统桌面环境（如 KDE Plasma / GNOME）原生绘制。横排/竖排方向与字体设置已由 RimeTune 直接接管生效；整体色彩由系统 Fcitx5 主题或桌面配色统筹管理。
+            </div>
+          )}
+
           {successToast && (
             <div
               style={{
@@ -634,6 +640,12 @@ hilited_candidate_label_color: 0xFFD9F99D`;
             <Layout size={18} color="#34d399" />
             <span>排列布局与候选词个数</span>
           </div>
+
+          {env?.platform === 'linux' && (
+            <div style={{ fontSize: '12px', color: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.1)', padding: '8px 12px', borderRadius: '8px', lineHeight: '1.5' }}>
+              ✓ <strong>Linux 实时打通：</strong>横排/竖排方向及字号已直接与系统 Fcitx5 核心配置（<code>~/.config/fcitx5/conf/classicui.conf</code>）联动，重新部署即时生效。
+            </div>
+          )}
 
           <div>
             <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px', fontWeight: 600 }}>

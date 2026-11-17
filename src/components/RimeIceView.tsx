@@ -88,6 +88,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
   const isFrost = selectedSchemaId.includes('frost');
   const isMint = selectedSchemaId.includes('mint');
   const isWanxiang = selectedSchemaId.includes('wanxiang');
+  const isNativeBasic = !isIce && !isFrost && !isMint && !isWanxiang;
   const [features, setFeatures] = useState<SchemeFeatureItem[]>([]);
   const [featuresLoading, setFeaturesLoading] = useState<boolean>(false);
   const [mountsInfo, setMountsInfo] = useState<SchemaDictMountsInfo | null>(null);
@@ -213,7 +214,18 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
       .then((res) => {
         if (res) {
           onFuzzyChange(res.fuzzy_pinyin);
-          onTogglesChange(res.toggles);
+          if (isIce || isFrost || isWanxiang || isMint) {
+            onTogglesChange(res.toggles);
+          } else {
+            // 原生基础方案仅同步自身真实支持的开关，避免冲刷覆盖其他已保存的特性
+            onTogglesChange({
+              ...toggles,
+              traditionalization: res.toggles.traditionalization,
+              full_shape: res.toggles.full_shape,
+              ascii_punct: res.toggles.ascii_punct,
+              spelling_hints: res.toggles.spelling_hints,
+            });
+          }
         }
       })
       .catch((err) => console.error('Failed to get schema state config:', err));
@@ -1418,6 +1430,12 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
           <Smile size={20} color="#fbbf24" />
           <span>输入特性与反查扩展</span>
         </div>
+
+        {isNativeBasic && (
+          <div style={{ fontSize: '12px', color: '#fbbf24', backgroundColor: 'rgba(251, 191, 36, 0.1)', padding: '10px 14px', borderRadius: '10px', marginBottom: '16px', lineHeight: '1.6', border: '1px solid rgba(251, 191, 36, 0.2)' }}>
+            💡 <strong>当前基础方案说明：</strong>当前选中的方案为原生基础方案（如朙月拼音）。候选词注音提示、简繁输出、标点/全半角及拼音模糊音均已原生完美支持；Emoji 联想、拆字反查、火星文等扩展滤镜需基于雾凇拼音或万象拼音等生态方案运行。
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '14px' }}>
           {/* 候选词旁显示拼音 (注音提示) */}
