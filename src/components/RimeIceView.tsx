@@ -37,6 +37,7 @@ interface RimeIceViewProps {
   customDicts?: CustomDictItem[];
   schemas?: SchemaItem[];
   userDir?: string;
+  activeSchemaId?: string;
   availableGrammarModels?: GrammarModelItem[];
   onFuzzyChange: (fuzzy: FuzzyPinyinConfig) => void;
   onTogglesChange: (toggles: RimeIceToggles) => void;
@@ -51,6 +52,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
   customDicts = [],
   schemas = [],
   userDir,
+  activeSchemaId,
   availableGrammarModels = [],
   onFuzzyChange,
   onTogglesChange,
@@ -64,15 +66,28 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
 
   // 专门用于顶部“方案特色智能功能与快捷指令手册”的手册浏览方案（独立于词库挂载与开关配置，仅用于手册查阅）
   const [manualSchemaId, setManualSchemaId] = useState<string>(() => {
+    if (activeSchemaId && validSchemas.some((s) => s.id === activeSchemaId)) {
+      return activeSchemaId;
+    }
     const firstEnabled = validSchemas.find((s) => s.enabled);
     return firstEnabled ? firstEnabled.id : (validSchemas[0]?.id || 'rime_ice');
   });
 
   // 词库与配置主方案（用于下方的字表挂载、外挂词库与专有开关配置）
   const [selectedSchemaId, setSelectedSchemaId] = useState<string>(() => {
+    if (activeSchemaId && validSchemas.some((s) => s.id === activeSchemaId)) {
+      return activeSchemaId;
+    }
     const firstEnabled = validSchemas.find((s) => s.enabled);
     return firstEnabled ? firstEnabled.id : (validSchemas[0]?.id || 'rime_ice');
   });
+
+  useEffect(() => {
+    if (activeSchemaId && validSchemas.some((s) => s.id === activeSchemaId)) {
+      setSelectedSchemaId(activeSchemaId);
+      setManualSchemaId(activeSchemaId);
+    }
+  }, [activeSchemaId]);
 
   useEffect(() => {
     const enabledList = validSchemas.filter((s) => s.enabled);

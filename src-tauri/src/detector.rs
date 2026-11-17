@@ -388,6 +388,21 @@ pub fn inspect_environment() -> EnvironmentStatus {
     // 探测当前激活的输入方案
     let mut detected_id_opt: Option<String> = None;
 
+    // 0. 最高优先级：从 user.yaml 读取运行时用户真实激活的输入方案 (previously_selected_schema)
+    let user_yaml = user_path.join("user.yaml");
+    if user_yaml.exists() {
+        if let Ok(content) = std::fs::read_to_string(&user_yaml) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                if let Some(prev) = val.get("var").and_then(|v| v.get("previously_selected_schema")).and_then(|s| s.as_str()) {
+                    let trimmed = prev.trim();
+                    if !trimmed.is_empty() {
+                        detected_id_opt = Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+
     // 1. 优先从 default.custom.yaml 获取用户当前配置的第一方案
     let default_custom = user_path.join("default.custom.yaml");
     if default_custom.exists() {
@@ -568,6 +583,12 @@ pub fn inspect_environment() -> EnvironmentStatus {
             "melt_eng" => "英文输入".to_string(),
             "radical_pinyin" => "部件拆字".to_string(),
             "luna_pinyin" => "朙月拼音".to_string(),
+            "luna_pinyin_simp" => "朙月拼音·简化字".to_string(),
+            "luna_pinyin_fluency" => "朙月拼音·語句流".to_string(),
+            "bopomofo" => "注音".to_string(),
+            "bopomofo_tw" => "注音·臺灣正體".to_string(),
+            "cangjie5" => "倉頡五代".to_string(),
+            "stroke" => "五筆畫".to_string(),
             "terra_pinyin" => "地球拼音".to_string(),
             "wubi98_mint" => "五笔98·薄荷".to_string(),
             "wubi86_jidian" => "极点五笔86".to_string(),

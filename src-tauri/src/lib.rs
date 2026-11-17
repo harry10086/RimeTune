@@ -621,8 +621,57 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     .map_err(|e| format!("检查更新任务调度失败: {}", e))?
 }
 
+#[cfg(target_os = "linux")]
+fn ensure_linux_desktop_icon() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    if home.is_empty() {
+        return;
+    }
+    let home_path = std::path::Path::new(&home);
+    let icon_dir = home_path.join(".local/share/icons/hicolor/128x128/apps");
+    let _ = std::fs::create_dir_all(&icon_dir);
+
+    let icon_bytes = include_bytes!("../icons/128x128.png");
+    let icon_path1 = icon_dir.join("com.rimetune.desktop.png");
+    let icon_path2 = icon_dir.join("rimetune.png");
+    let _ = std::fs::write(&icon_path1, icon_bytes);
+    let _ = std::fs::write(&icon_path2, icon_bytes);
+
+    let apps_dir = home_path.join(".local/share/applications");
+    let _ = std::fs::create_dir_all(&apps_dir);
+
+    // 获取当前正在运行的实际二进制绝对路径
+    let exe_path = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| format!("{}/桌面/RimeTune", home));
+
+    let desktop_content = format!(
+        "[Desktop Entry]\n\
+         Name=RimeTune\n\
+         GenericName=Rime Configuration Tool\n\
+         Comment=中州韵配置中心\n\
+         Exec=\"{}\" %U\n\
+         Icon={}\n\
+         Terminal=false\n\
+         Type=Application\n\
+         Categories=Utility;Settings;\n\
+         StartupWMClass=rimetune\n\
+         StartupNotify=true\n",
+        exe_path,
+        icon_path1.to_string_lossy()
+    );
+
+    let desktop_file1 = apps_dir.join("com.rimetune.desktop.desktop");
+    let desktop_file2 = apps_dir.join("rimetune.desktop");
+    let _ = std::fs::write(&desktop_file1, &desktop_content);
+    let _ = std::fs::write(&desktop_file2, &desktop_content);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    ensure_linux_desktop_icon();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {

@@ -981,6 +981,22 @@ pub fn scan_actual_installed_schemas(user_dir: &str) -> Vec<SchemaItem> {
     let mut schemas = Vec::new();
     let u_path = Path::new(user_dir);
 
+    // 0. 读取 user.yaml 中的 previously_selected_schema 作为最高优先级激活首选方案
+    let mut previously_selected = None;
+    let user_yaml = u_path.join("user.yaml");
+    if user_yaml.exists() {
+        if let Ok(c) = fs::read_to_string(&user_yaml) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
+                if let Some(prev) = val.get("var").and_then(|v| v.get("previously_selected_schema")).and_then(|s| s.as_str()) {
+                    let trimmed = prev.trim();
+                    if !trimmed.is_empty() {
+                        previously_selected = Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+
     // 读取 default.custom.yaml 获取当前生效的方案列表
     let mut active_ids = Vec::new();
     let default_custom = u_path.join("default.custom.yaml");
@@ -1032,6 +1048,18 @@ pub fn scan_actual_installed_schemas(user_dir: &str) -> Vec<SchemaItem> {
                     }
                 }
             }
+        }
+    }
+
+    // 若 user.yaml 指定了当前运行态真实激活的方案，将其置顶于 active_ids 的首位
+    if let Some(prev) = previously_selected {
+        if let Some(pos) = active_ids.iter().position(|id| id == &prev) {
+            active_ids.remove(pos);
+            active_ids.insert(0, prev);
+        } else if !active_ids.is_empty() {
+            active_ids.insert(0, prev);
+        } else {
+            active_ids.push(prev);
         }
     }
 
