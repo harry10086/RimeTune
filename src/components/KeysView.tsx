@@ -178,9 +178,10 @@ export const KeysView: React.FC<KeysViewProps> = ({
   };
 
   const shiftOptions = [
-    { value: 'inline_ascii', label: '行内英文 (inline_ascii - 推荐)' },
+    { value: 'commit_text', label: '首选词上屏并切英文 (commit_text - 类似微软/搜狗拼音，推荐)' },
+    { value: 'clear', label: '清空未上屏拼音并切英文 (clear - 放弃当前输入)' },
+    { value: 'inline_ascii', label: '行内临时西文模式 (inline_ascii - 需回车或空格确认)' },
     { value: 'commit_code', label: '顶出拼音字母并切英文 (commit_code)' },
-    { value: 'commit_text', label: '首选词上屏并切英文 (commit_text)' },
     { value: 'noop', label: '无动作 (保持中文)' },
   ];
 
@@ -325,6 +326,28 @@ export const KeysView: React.FC<KeysViewProps> = ({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* 中英文切换按键行为说明 */}
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              padding: '12px 14px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(56, 189, 248, 0.08)',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              fontSize: '12px',
+              color: 'var(--text-muted)',
+              lineHeight: '1.6',
+            }}
+          >
+            <div style={{ fontWeight: 700, color: '#38bdf8', marginBottom: '4px' }}>
+              💡 Shift 中英文切换行为说明：
+            </div>
+            <div>• <strong>首选词上屏并切英文 (commit_text - 推荐)</strong>：打字中途按 Shift 将第 1 个候选汉字直接上屏并切换到英文，符合搜狗/微软拼音等主流习惯。</div>
+            <div>• <strong>清空未上屏拼音并切英文 (clear)</strong>：打字中途按 Shift 直接放弃并清除已输入的拼音编码，直接进入英文状态。</div>
+            <div>• <strong>行内临时西文模式 (inline_ascii)</strong>：将拼音字母作为临时英文保留在屏幕行内等待回车确认；若在不支持行内暂存的应用中可能会直接将字母落字上屏。</div>
+            <div>• <strong>顶出拼音字母并切英文 (commit_code)</strong>：打字中途按 Shift 会将打了一半的拼音字母直接落字上屏并切为英文。</div>
           </div>
 
           {/* Caps Lock 切换与大写锁定行为 */}

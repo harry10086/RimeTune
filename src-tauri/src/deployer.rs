@@ -123,35 +123,44 @@ pub fn run_weasel_command(
             }
         };
 
-        // Fcitx5 环境：通过 D-Bus 接口通知 Fcitx5-Rime 重新部署，并重载配置
+        // Fcitx5 环境：通知部署并彻底重启 Fcitx5 服务以清空旧会话并使编译后的新配置即刻生效
         if target_is_fcitx5 {
-            // 通过 busctl 调用 Fcitx5 接口通知 Rime 重新部署
-            let busctl_status = Command::new("busctl")
+            // 1. 通过 D-Bus 接口通知 Fcitx5-Rime 执行部署指令
+            let _ = Command::new("busctl")
                 .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "SetConfig", "sv", "fcitx://config/addon/rime/deploy", "s", ""])
                 .status();
 
-            let qdbus_status = if busctl_status.as_ref().map(|s| s.success()).unwrap_or(false) {
-                busctl_status
-            } else {
-                Command::new("qdbus")
-                    .args(["org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1.SetConfig", "fcitx://config/addon/rime/deploy", ""])
-                    .status()
-            };
+            // 2. 调用 Restart 彻底重启 Fcitx5 服务。
+            // 关键作用：单纯的 fcitx5-remote -r 无法销毁现有已打开窗口（Kate、Konsole、浏览器）的驻留 Rime 内存会话，
+            // 只有 Restart 能让所有应用窗口重新连接 Fcitx5，并立即加载最新的 user.yaml 状态、开关及按键！
+            let restart_status = Command::new("busctl")
+                .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "Restart"])
+                .status();
 
-            // 同时重载 fcitx5 守护进程
-            let _ = Command::new("fcitx5-remote").arg("-r").status();
+            let mut restarted = restart_status.as_ref().map(|s| s.success()).unwrap_or(false);
+            if !restarted {
+                // 如果 busctl 失败，尝试 qdbus
+                let qdbus_res = Command::new("qdbus")
+                    .args(["org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1.Restart"])
+                    .status();
+                restarted = qdbus_res.as_ref().map(|s| s.success()).unwrap_or(false);
+            }
+            if !restarted {
+                // 兜底方案：重载守护进程
+                let _ = Command::new("fcitx5-remote").arg("-r").status();
+            }
 
             let method_note = if rime_deployed {
-                "rime_deployer + Fcitx5 D-Bus"
-            } else if qdbus_status.as_ref().map(|s| s.success()).unwrap_or(false) {
-                "Fcitx5 D-Bus 重新部署"
+                "rime_deployer + Fcitx5 重启"
+            } else if restarted {
+                "Fcitx5 D-Bus 重新部署与重启"
             } else {
                 "Fcitx5 重载 (已清空构建缓存并更新时间戳)"
             };
 
             return DeployResult {
                 success: true,
-                message: format!("已成功触发 Fcitx5-Rime 重新部署与重载 ({})", method_note),
+                message: format!("已成功触发 Fcitx5-Rime 部署与服务重启 ({})", method_note),
                 deployer_used: method_note.to_string(),
             };
         }
