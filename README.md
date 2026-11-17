@@ -28,7 +28,7 @@ RimeTune 是一款专为 **Rime（中州韵输入法引擎）全平台（Windows
 
 4. **Octagram 上下文语言模型完整支持**：
    - **自动扫描与识别**：后端底层自动扫描 Rime 用户目录下所有 `*.gram` 语言模型文件（如万象官方 `wanxiang-lts-zh-hans.gram`），自动提取模型标识与文件大小，并在系统仪表盘以专属诊断卡片直观呈现；
-   - **零破坏补丁自动挂载**：遵循 Rime 原生规范，开启时结构化写入 `grammar/language`、`grammar/collocation_max_length`、`grammar/collocation_min_length` 及 `translator/contextual_suggestions: false` 补丁，关闭时安全卸载，彻底打通长句智能预测能力；
+   - **零破坏补丁自动挂载**：遵循 Rime 原生规范，开启时结构化写入 `grammar/language`、`grammar/collocation_max_length`、`grammar/collocation_min_length` 及 `translator/contextual_suggestions: true` 补丁，关闭时安全卸载并置为 `false`，彻底打通长句智能预测能力；
    - **科学调校搭配长度**：根据万象官方推荐调优基准，将搭配最大长度滑块科学收拢至 `2~8` 范围并明确标注 **`推荐 5~6 词 (万象官方基准)`**，在获得极佳整句命中率的同时彻底规避长句输入卡顿掉帧。
 
 5. **实时候选框所见即所得模拟渲染与皮肤方案定制**：

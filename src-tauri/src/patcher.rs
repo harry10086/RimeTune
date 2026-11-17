@@ -2571,25 +2571,47 @@ pub fn detect_switch_reset(val: &serde_yaml::Value, switch_name: &str) -> Option
 /// 解析指定方案 schema 中的 switches 列表，找到与目标开关名称匹配的真实数字索引
 pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_name: &str) -> Option<usize> {
     let u_path = Path::new(user_dir);
-    let mut schema_file = u_path.join(format!("{}.schema.yaml", schema_id));
-    if !schema_file.exists() && schema_id.starts_with("wanxiang") {
-        let base = u_path.join("wanxiang.schema.yaml");
-        if base.exists() {
-            schema_file = base;
+    let mut candidate_paths = vec![
+        u_path.join(format!("{}.schema.yaml", schema_id)),
+        u_path.join("build").join(format!("{}.schema.yaml", schema_id)),
+        u_path.join("custom").join(format!("{}.schema.yaml", schema_id)),
+    ];
+
+    let (detected_root, _, _) = crate::detector::detect_weasel_paths();
+    if let Some(ref wr) = detected_root {
+        candidate_paths.push(Path::new(wr).join("data").join(format!("{}.schema.yaml", schema_id)));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for dir in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
+            candidate_paths.push(Path::new(dir).join(format!("{}.schema.yaml", schema_id)));
+            candidate_paths.push(Path::new(dir).join("custom").join(format!("{}.schema.yaml", schema_id)));
         }
     }
-    if !schema_file.exists() {
-        for scheme_subdir in &["scheme/rime-frost-master", "scheme/oh-my-rime-main", "scheme/rime-wanxiang-base"] {
-            let p = Path::new(scheme_subdir).join(format!("{}.schema.yaml", schema_id));
-            if p.exists() {
-                schema_file = p;
-                break;
-            }
+    #[cfg(target_os = "macos")]
+    {
+        candidate_paths.push(Path::new("/Library/Input Methods/Squirrel.app/Contents/SharedSupport").join(format!("{}.schema.yaml", schema_id)));
+    }
+
+    for scheme_subdir in &[
+        "scheme/rime-wanxiang-base/custom",
+        "scheme/rime-wanxiang-base",
+        "scheme/rime-frost-master",
+        "scheme/oh-my-rime-main",
+    ] {
+        candidate_paths.push(Path::new(scheme_subdir).join(format!("{}.schema.yaml", schema_id)));
+    }
+
+    let mut schema_file = None;
+    for cp in candidate_paths {
+        if cp.exists() {
+            schema_file = Some(cp);
+            break;
         }
     }
 
-    if schema_file.exists() {
-        if let Ok(c) = fs::read_to_string(&schema_file) {
+    if let Some(s_file) = schema_file {
+        if let Ok(c) = fs::read_to_string(&s_file) {
             if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
                 if let Some(switches) = val.get("switches").and_then(|s| s.as_sequence()) {
                     for (idx, item) in switches.iter().enumerate() {
@@ -2597,7 +2619,7 @@ pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_n
                             if name == switch_name {
                                 return Some(idx);
                             }
-                            if switch_name == "traditionalization" && (name == "transcription" || name == "traditionalize") {
+                            if switch_name == "traditionalization" && (name == "transcription" || name == "traditionalize" || name == "zh_simp" || name == "simplification") {
                                 return Some(idx);
                             }
                             if switch_name == "emoji" && (name == "emoji_suggestion") {
@@ -2618,7 +2640,7 @@ pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_n
                                     if opt_str == switch_name {
                                         return Some(idx);
                                     }
-                                    if switch_name == "traditionalization" && (opt_str == "s2t" || opt_str == "s2s") {
+                                    if switch_name == "traditionalization" && (opt_str == "s2t" || opt_str == "s2s" || opt_str == "zh_simp" || opt_str == "zh_trad") {
                                         return Some(idx);
                                     }
                                     if switch_name == "tone_display" && opt_str == "tone_display" {
@@ -2636,7 +2658,7 @@ pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_n
         }
     }
 
-    // 内置主流方案已知标准索引 Fallback
+    // 内置主流方案已知标准索引 Fallback（精确针对各个子方案）
     match schema_id {
         "rime_ice" => match switch_name {
             "ascii_punct" => Some(1),
@@ -2663,6 +2685,31 @@ pub fn resolve_switch_index_for_schema(user_dir: &str, schema_id: &str, switch_n
             "mars" => Some(6),
             "chaifen" => Some(7),
             "pin_cand" => Some(8),
+            _ => None,
+        },
+        "wanxiang_lite" | "wanxiang_pure" => match switch_name {
+            "ascii_punct" => Some(1),
+            "full_shape" => Some(2),
+            "emoji" => Some(3),
+            "chinese_english" | "english_chinese" => Some(4),
+            "traditionalization" | "s2t" => Some(6),
+            "abbrev" => Some(7),
+            "tone_hint" | "spelling_hints" | "toneless_hint" => Some(8),
+            "search_single_char" | "char_priority" => Some(9),
+            _ => None,
+        },
+        "wanxiang_t9" | "wanxiang_t9i" => match switch_name {
+            "ascii_punct" => Some(1),
+            "full_shape" => Some(2),
+            "emoji" => Some(3),
+            "chinese_english" | "english_chinese" => Some(4),
+            "charset_filter" => Some(5),
+            "context_reorder" => Some(6),
+            "tone_display" => Some(7),
+            "traditionalization" | "s2t" => Some(8),
+            "tone_hint" | "spelling_hints" | "comment_off" => Some(9),
+            "super_tips" => Some(10),
+            "search_single_char" | "char_priority" => Some(11),
             _ => None,
         },
         s if s.starts_with("wanxiang") => match switch_name {
@@ -3993,6 +4040,11 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             rime_ice_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
             rime_ice_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", config.rime_ice_toggles.grammar_collocation_max_length));
             rime_ice_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", config.rime_ice_toggles.grammar_collocation_min_length));
+            rime_ice_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
+        } else {
+            rime_ice_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
+            rime_ice_yaml.push_str("  \"grammar/language\": ~\n");
+            rime_ice_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
         }
 
         let _ = validate_yaml(&rime_ice_yaml, "rime_ice.custom.yaml");
@@ -4078,10 +4130,11 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 frost_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
                 frost_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
                 frost_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
-                frost_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
+                frost_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
             } else {
                 frost_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
                 frost_yaml.push_str("  \"grammar/language\": ~\n");
+                frost_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
             }
 
             let _ = validate_yaml(&frost_yaml, &format!("{}.custom.yaml", frost_id));
@@ -4162,10 +4215,11 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 mint_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
                 mint_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
                 mint_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
-                mint_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
+                mint_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
             } else {
                 mint_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
                 mint_yaml.push_str("  \"grammar/language\": ~\n");
+                mint_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
             }
 
             let _ = validate_yaml(&mint_yaml, &format!("{}.custom.yaml", mint_id));
@@ -4254,10 +4308,11 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 wx_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
                 wx_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
                 wx_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
-                wx_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
+                wx_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
             } else {
                 wx_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
                 wx_yaml.push_str("  \"grammar/language\": ~\n");
+                wx_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
             }
 
             let _ = validate_yaml(&wx_yaml, &format!("{}.custom.yaml", wx_id));
