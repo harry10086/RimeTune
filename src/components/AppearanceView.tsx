@@ -92,6 +92,8 @@ export const AppearanceView: React.FC<AppearanceViewProps> = ({
     const q = fontSearch.toLowerCase();
     return systemFonts.filter((f) => f.toLowerCase().includes(q));
   }, [systemFonts, fontSearch]);
+  const isLinux = env?.platform === 'linux';
+
   const currentScheme = presetSchemes.find(
     (s) => s.id === styleConfig.color_scheme
   ) || presetSchemes[0] || {
@@ -415,20 +417,38 @@ hilited_candidate_label_color: 0xFFD9F99D`;
       {/* 选项配置面板 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '18px' }}>
         {/* 皮肤与调色盘 */}
-        <div className="glass-panel glow-card" style={{ padding: '22px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        <div
+          className="glass-panel glow-card"
+          style={{
+            padding: '22px',
+            borderRadius: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px',
+            position: 'relative',
+            ...(isLinux ? { opacity: 0.55, pointerEvents: 'none' } : {}),
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
               <Palette size={18} color="#38bdf8" />
               <span>皮肤预设与实时调色盘</span>
+              {isLinux && (
+                <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', backgroundColor: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                  由系统框架管理（已置灰）
+                </span>
+              )}
             </div>
-            <span style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Pipette size={14} /> 可点击色块调色
-            </span>
+            {!isLinux && (
+              <span style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Pipette size={14} /> 可点击色块调色
+              </span>
+            )}
           </div>
 
-          {env?.platform === 'linux' && (
+          {isLinux && (
             <div style={{ fontSize: '12px', color: '#fbbf24', backgroundColor: 'rgba(251, 191, 36, 0.1)', padding: '10px 14px', borderRadius: '8px', lineHeight: '1.5' }}>
-              💡 <strong>Linux 皮肤说明：</strong>在 Linux（Fcitx5 / IBus）中，候选窗体由输入法框架与系统桌面环境（如 KDE Plasma / GNOME）原生绘制。横排/竖排方向与字体设置已由 RimeTune 直接接管生效；整体色彩由系统 Fcitx5 主题或桌面配色统筹管理。
+              💡 <strong>Linux 说明：</strong>在 Linux 环境下，Fcitx5 / IBus 输入法候选窗体由桌面框架（如 KDE Plasma / GNOME）原生渲染，皮肤配色由输入法框架主题直接控制，Rime 自身无法配置 GUI 皮肤。
             </div>
           )}
 
@@ -641,26 +661,34 @@ hilited_candidate_label_color: 0xFFD9F99D`;
             <span>排列布局与候选词个数</span>
           </div>
 
-          {env?.platform === 'linux' && (
-            <div style={{ fontSize: '12px', color: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.1)', padding: '8px 12px', borderRadius: '8px', lineHeight: '1.5' }}>
-              ✓ <strong>Linux 实时打通：</strong>横排/竖排方向及字号已直接与系统 Fcitx5 核心配置（<code>~/.config/fcitx5/conf/classicui.conf</code>）联动，重新部署即时生效。
+          {isLinux && (
+            <div style={{ fontSize: '12px', color: '#fbbf24', backgroundColor: 'rgba(251, 191, 36, 0.1)', padding: '8px 12px', borderRadius: '8px', lineHeight: '1.5' }}>
+              💡 <strong>Linux 说明：</strong>横竖排由 Fcitx5/IBus 面板统一控制（如 Fcitx5 配置 → 经典用户界面 → 竖排候选词列表），候选词个数 (page_size) 为 Rime 引擎参数已正常支持。
             </div>
           )}
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px', fontWeight: 600 }}>
-              候选词排列方向 (horizontal)
-            </label>
+          <div style={isLinux ? { opacity: 0.45, pointerEvents: 'none' } : {}}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <label style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: 600 }}>
+                候选词排列方向 (horizontal)
+              </label>
+              {isLinux && (
+                <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', backgroundColor: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                  由 Fcitx5/IBus 控制（已置灰）
+                </span>
+              )}
+            </div>
             <div style={{ display: 'flex', gap: '14px' }}>
               <button
                 type="button"
+                disabled={isLinux}
                 onClick={() => updateStyle({ horizontal: true })}
                 style={{
                   flex: 1,
                   padding: '10px 14px',
                   borderRadius: '8px',
                   fontSize: '14px',
-                  cursor: 'pointer',
+                  cursor: isLinux ? 'not-allowed' : 'pointer',
                   border: styleConfig.horizontal ? '1px solid #38bdf8' : '1px solid var(--border)',
                   backgroundColor: styleConfig.horizontal ? 'rgba(56, 189, 248, 0.2)' : 'var(--bg-tertiary)',
                   color: styleConfig.horizontal ? '#38bdf8' : 'var(--text-main)',
@@ -675,13 +703,14 @@ hilited_candidate_label_color: 0xFFD9F99D`;
               </button>
               <button
                 type="button"
+                disabled={isLinux}
                 onClick={() => updateStyle({ horizontal: false })}
                 style={{
                   flex: 1,
                   padding: '10px 14px',
                   borderRadius: '8px',
                   fontSize: '14px',
-                  cursor: 'pointer',
+                  cursor: isLinux ? 'not-allowed' : 'pointer',
                   border: !styleConfig.horizontal ? '1px solid #38bdf8' : '1px solid var(--border)',
                   backgroundColor: !styleConfig.horizontal ? 'rgba(56, 189, 248, 0.2)' : 'var(--bg-tertiary)',
                   color: !styleConfig.horizontal ? '#38bdf8' : 'var(--text-main)',
@@ -720,10 +749,27 @@ hilited_candidate_label_color: 0xFFD9F99D`;
         </div>
 
         {/* 字体与字号 */}
-        <div className="glass-panel glow-card" style={{ padding: '22px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
-            <Type size={18} color="#fbbf24" />
-            <span>字体系列与字号大小</span>
+        <div
+          className="glass-panel glow-card"
+          style={{
+            padding: '22px',
+            borderRadius: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px',
+            ...(isLinux ? { opacity: 0.5, pointerEvents: 'none' } : {}),
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
+              <Type size={18} color="#fbbf24" />
+              <span>字体系列与字号大小</span>
+            </div>
+            {isLinux && (
+              <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', backgroundColor: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                由输入法框架管理（已置灰）
+              </span>
+            )}
           </div>
 
           <div>
@@ -1098,10 +1144,27 @@ hilited_candidate_label_color: 0xFFD9F99D`;
         </div>
 
         {/* 窗口内边距与间距排版设置 (Layout) */}
-        <div className="glass-panel glow-card" style={{ padding: '22px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
-            <Sliders size={18} color="#06b6d4" />
-            <span>窗口内边距与间距排版 (Layout & Spacing)</span>
+        <div
+          className="glass-panel glow-card"
+          style={{
+            padding: '22px',
+            borderRadius: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px',
+            ...(isLinux ? { opacity: 0.5, pointerEvents: 'none' } : {}),
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
+              <Sliders size={18} color="#06b6d4" />
+              <span>窗口内边距与间距排版 (Layout & Spacing)</span>
+            </div>
+            {isLinux && (
+              <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', backgroundColor: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                由输入法框架管理（已置灰）
+              </span>
+            )}
           </div>
 
           {/* 水平边距 */}
@@ -1182,10 +1245,27 @@ hilited_candidate_label_color: 0xFFD9F99D`;
         </div>
 
         {/* 边框、圆角与阴影设置 */}
-        <div className="glass-panel glow-card" style={{ padding: '22px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
-            <Square size={18} color="#c084fc" />
-            <span>圆角、边框、阴影与行内预编辑</span>
+        <div
+          className="glass-panel glow-card"
+          style={{
+            padding: '22px',
+            borderRadius: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px',
+            ...(isLinux ? { opacity: 0.5, pointerEvents: 'none' } : {}),
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
+              <Square size={18} color="#c084fc" />
+              <span>圆角、边框、阴影与行内预编辑</span>
+            </div>
+            {isLinux && (
+              <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', backgroundColor: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24' }}>
+                由输入法框架管理（已置灰）
+              </span>
+            )}
           </div>
 
           {/* 窗口圆角 */}

@@ -3438,10 +3438,6 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                         }
                     }
 
-                    if let Some(b) = patch.get("style/horizontal").and_then(|v| v.as_bool()) { style.horizontal = b; }
-                    if let Some(s) = patch.get("style/font_face").and_then(|v| v.as_str()) { style.font_face = s.to_string(); }
-                    if let Some(u) = patch.get("style/font_point").and_then(|v| v.as_u64()) { style.font_point = u as u32; }
-
                     // 支持从 default.custom.yaml 中读取 app_options (Linux / 全局配置规范)
                     if let Some(patch_map) = patch.as_mapping() {
                         let mut default_app_map: std::collections::BTreeMap<String, (bool, bool)> = std::collections::BTreeMap::new();
@@ -3763,36 +3759,6 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
     let dict_files = scan_installed_dicts(user_dir);
     let custom_dicts = scan_custom_dicts(user_dir);
 
-    // 在 Linux 环境下，若存在 Fcitx5 classicui.conf，以系统框架实际生效的横竖排与字体为准
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            let classicui_file = PathBuf::from(&home).join(".config").join("fcitx5").join("conf").join("classicui.conf");
-            if classicui_file.exists() {
-                if let Ok(c) = fs::read_to_string(&classicui_file) {
-                    for line in c.lines() {
-                        let trimmed = line.trim();
-                        if let Some(val) = trimmed.strip_prefix("Vertical Candidate List=") {
-                            style.horizontal = val.trim().eq_ignore_ascii_case("false");
-                        } else if let Some(val) = trimmed.strip_prefix("Font=") {
-                            let font_val = val.trim().trim_matches('"');
-                            if let Some((face, pt)) = font_val.rsplit_once(' ') {
-                                if let Ok(pt_num) = pt.parse::<u32>() {
-                                    style.font_point = pt_num;
-                                    style.font_face = face.to_string();
-                                } else {
-                                    style.font_face = font_val.to_string();
-                                }
-                            } else {
-                                style.font_face = font_val.to_string();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     UnifiedFullConfig {
         style,
         preset_schemes,
@@ -4014,24 +3980,9 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     default_yaml.push_str(&format!("  \"switches/@name/full_shape/reset\": {}\n", if config.rime_ice_toggles.full_shape { 1 } else { 0 }));
     default_yaml.push_str(&format!("  \"switches/@name/ascii_punct/reset\": {}\n", if config.rime_ice_toggles.ascii_punct { 1 } else { 0 }));
 
-    if is_linux {
-        default_yaml.push_str("\n  # 界面布局与字体 (Linux 规范)\n");
-        default_yaml.push_str(&format!("  \"style/horizontal\": {}\n", config.style.horizontal));
-        if !config.style.font_face.trim().is_empty() {
-            default_yaml.push_str(&format!("  \"style/font_face\": \"{}\"\n", yaml_escape_str(&config.style.font_face)));
-        }
-        if config.style.font_point > 0 {
-            default_yaml.push_str(&format!("  \"style/font_point\": {}\n", config.style.font_point));
-        }
-    }
-
     validate_yaml(&default_yaml, "default.custom.yaml")?;
     fs::write(u_path.join("default.custom.yaml"), default_yaml)
         .map_err(|e| format!("写入 default.custom.yaml 失败: {}", e))?;
-
-    if is_linux {
-        let _ = sync_fcitx5_classicui(&config.style);
-    }
 
     // 3. 通用补丁片段准备：模糊音与翻页按键多选绑定
     let mut fuzzy_rules = Vec::new();
@@ -4632,48 +4583,5 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     }
 
-    Ok(())
-}
-
-/// Linux 环境下将界面的横竖排与字体设置同步至 Fcitx5 的 classicui.conf
-pub fn sync_fcitx5_classicui(style: &WeaselStyleConfig) -> Result<(), String> {
-    if let Ok(home) = std::env::var("HOME") {
-        let config_dir = PathBuf::from(&home).join(".config").join("fcitx5").join("conf");
-        let classicui_file = config_dir.join("classicui.conf");
-        let _ = fs::create_dir_all(&config_dir);
-
-        let mut lines = Vec::new();
-        if classicui_file.exists() {
-            if let Ok(content) = fs::read_to_string(&classicui_file) {
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("Vertical Candidate List=")
-                        || trimmed.starts_with("Font=")
-                        || trimmed.starts_with("PerScreenDPI=")
-                        || trimmed.starts_with("WheelForPaging=")
-                    {
-                        continue;
-                    }
-                    lines.push(line.to_string());
-                }
-            }
-        }
-
-        lines.push(format!("Vertical Candidate List={}", if style.horizontal { "False" } else { "True" }));
-        lines.push("PerScreenDPI=True".to_string());
-        lines.push("WheelForPaging=True".to_string());
-        if !style.font_face.trim().is_empty() {
-            let pt = if style.font_point > 0 { style.font_point } else { 12 };
-            lines.push(format!("Font=\"{} {}\"", style.font_face.trim(), pt));
-        }
-
-        let new_content = lines.join("\n") + "\n";
-        let _ = fs::write(&classicui_file, new_content);
-
-        // 调用 D-Bus 通知 Fcitx5 重新加载 UI 配置
-        let _ = std::process::Command::new("busctl")
-            .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "ReloadConfig"])
-            .output();
-    }
     Ok(())
 }

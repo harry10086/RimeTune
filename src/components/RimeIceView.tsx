@@ -1645,8 +1645,20 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
             </div>
           )}
 
-          {/* Emoji 候选 (全方案通用) */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-tertiary)', border: toggles.emoji ? '1px solid #f472b6' : '1px solid var(--border)', gap: '12px' }}>
+          {/* Emoji 候选 */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 16px',
+              borderRadius: '10px',
+              backgroundColor: 'var(--bg-tertiary)',
+              border: toggles.emoji && !isNativeBasic ? '1px solid #f472b6' : '1px solid var(--border)',
+              gap: '12px',
+              ...(isNativeBasic ? { opacity: 0.5 } : {}),
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ padding: '8px', borderRadius: '8px', backgroundColor: 'rgba(244, 114, 182, 0.15)', color: '#f472b6', flexShrink: 0 }}>
                 <Smile size={18} />
@@ -1654,28 +1666,44 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
                   <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>Emoji 表情联想</span>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      padding: '2px 7px',
-                      borderRadius: '4px',
-                      backgroundColor: toggles.emoji ? 'rgba(244, 114, 182, 0.2)' : 'rgba(148, 163, 184, 0.15)',
-                      color: toggles.emoji ? '#f472b6' : 'var(--text-dim)',
-                    }}
-                  >
-                    当前: {toggles.emoji ? '已开启' : '已关闭'}
-                  </span>
+                  {isNativeBasic ? (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(251, 191, 36, 0.15)',
+                        color: '#fbbf24',
+                      }}
+                    >
+                      当前基础方案未内置（已置灰）
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        backgroundColor: toggles.emoji ? 'rgba(244, 114, 182, 0.2)' : 'rgba(148, 163, 184, 0.15)',
+                        color: toggles.emoji ? '#f472b6' : 'var(--text-dim)',
+                      }}
+                    >
+                      当前: {toggles.emoji ? '已开启' : '已关闭'}
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
-                  开：打拼音联想 Emoji / 关：纯汉字候选
+                  {isNativeBasic ? '朙月拼音等原生基础方案未内置 opencc/emoji 滤镜，如需 Emoji 请使用雾凇或万象方案' : '开：打拼音联想 Emoji / 关：纯汉字候选'}
                 </div>
               </div>
             </div>
-            <label className="toggle-switch" style={{ flexShrink: 0 }}>
+            <label className="toggle-switch" style={{ flexShrink: 0, ...(isNativeBasic ? { pointerEvents: 'none' } : {}) }}>
               <input
                 type="checkbox"
-                checked={toggles.emoji}
+                disabled={isNativeBasic}
+                checked={isNativeBasic ? false : toggles.emoji}
                 onChange={(e) => updateToggles({ emoji: e.target.checked })}
               />
               <span className="slider"></span>
