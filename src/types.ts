@@ -258,3 +258,12 @@ export interface RimeSyncConfig {
   sync_dir: string;
 }
 
+export interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_notes: string;
+  release_url: string;
+  published_at: string;
+}
+

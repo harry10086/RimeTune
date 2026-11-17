@@ -8,6 +8,7 @@ import {
   BackupSnapshot,
   DeployResult,
   DiffItem,
+  UpdateCheckResult,
 } from './types';
 import { DashboardView } from './components/DashboardView';
 import { AppearanceView } from './components/AppearanceView';
@@ -33,6 +34,8 @@ import {
   Sun,
   Moon,
   ExternalLink,
+  ArrowUpCircle,
+  X,
 } from 'lucide-react';
 
 export function App() {
@@ -50,6 +53,10 @@ export function App() {
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [lastDeployResult, setLastDeployResult] = useState<DeployResult | null>(null);
 
+  // 检查更新状态
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateModalData, setUpdateModalData] = useState<UpdateCheckResult | null>(null);
+
   // 主题模式管理 (暗黑 / 亮色)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('weaseltune_theme');
@@ -66,12 +73,25 @@ export function App() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  const openRepoUrl = async () => {
+  const openExternalUrl = async (url: string) => {
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl('https://github.com/harry10086/RimeTune');
+      await openUrl(url);
     } catch {
-      window.open('https://github.com/harry10086/RimeTune', '_blank');
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleCheckUpdate = async () => {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    try {
+      const res = await invoke<UpdateCheckResult>('check_for_updates');
+      setUpdateModalData(res);
+    } catch (err: any) {
+      showToast(typeof err === 'string' ? err : '检查更新失败，请检查网络连接', 'error');
+    } finally {
+      setCheckingUpdate(false);
     }
   };
 
@@ -474,32 +494,12 @@ export function App() {
           />
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.3px' }}>
+              <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.3px' }}>
                 RimeTune
               </span>
-              <button
-                type="button"
-                onClick={openRepoUrl}
-                title="访问 GitHub 项目仓库 (RimeTune)"
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  color: 'var(--accent)',
-                  backgroundColor: 'var(--accent-glow)',
-                  padding: '2px 7px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-accent)',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  lineHeight: '1',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <span>v0.3.0</span>
-                <ExternalLink size={11} />
-              </button>
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>
+              Rime 输入法调谐中心
             </div>
           </div>
         </div>
@@ -536,17 +536,45 @@ export function App() {
           })}
         </nav>
 
-        {/* 底部环境状态标识 */}
-        <div style={{ padding: '20px', borderTop: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-dim)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: env?.weasel_installed ? '#34d399' : '#f43f5e' }} />
-            <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>
-              {env?.host_display_name || 'Rime'} {env?.weasel_version || (env?.weasel_installed ? '已就绪' : '未就绪')}
-            </span>
+        {/* 底部环境状态标识与检查更新 */}
+        <div style={{ padding: '16px 18px', borderTop: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-dim)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: env?.weasel_installed ? '#34d399' : '#f43f5e' }} />
+              <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                {env?.host_display_name || 'Rime'} {env?.weasel_version || (env?.weasel_installed ? '已就绪' : '未就绪')}
+              </span>
+            </div>
+            <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              主方案: {env?.active_schema_name || '朙月拼音'}
+            </div>
           </div>
-          <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            主方案: {env?.active_schema_name || '朙月拼音'}
-          </div>
+
+          <button
+            type="button"
+            onClick={handleCheckUpdate}
+            disabled={checkingUpdate}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              width: '100%',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-tertiary)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-main)',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: checkingUpdate ? 'not-allowed' : 'pointer',
+              opacity: checkingUpdate ? 0.7 : 1,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <ArrowUpCircle size={14} color="var(--accent)" />
+            <span>{checkingUpdate ? '正在检查更新...' : '检查软件更新'}</span>
+          </button>
         </div>
       </aside>
 
@@ -814,6 +842,192 @@ export function App() {
                 ⚡ 部署过程中窗口已安全保护，无需重复点击
               </span>
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* 检查更新弹窗 */}
+      {updateModalData && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            backdropFilter: 'blur(4px)',
+            animation: 'fadeIn 0.15s ease',
+          }}
+          onClick={() => setUpdateModalData(null)}
+        >
+          <div
+            style={{
+              width: '480px',
+              maxWidth: '92vw',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: '16px',
+              padding: '24px',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 弹窗头部 */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    backgroundColor: updateModalData.has_update ? 'rgba(56, 189, 248, 0.15)' : 'rgba(52, 211, 153, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: updateModalData.has_update ? 'var(--accent)' : '#34d399',
+                  }}
+                >
+                  <ArrowUpCircle size={22} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-main)' }}>
+                    {updateModalData.has_update ? '发现 RimeTune 新版本！' : '当前已是最新版本'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    当前版本: v{updateModalData.current_version} · 最新版本: v{updateModalData.latest_version}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUpdateModalData(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* 版本状态与更新说明 */}
+            {updateModalData.has_update ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                    fontSize: '13px',
+                    color: 'var(--text-main)',
+                    lineHeight: '1.6',
+                  }}
+                >
+                  🎉 GitHub 上已发布最新版本 <strong>v{updateModalData.latest_version}</strong>，推荐前往下载体验最新功能与修复。
+                </div>
+
+                {updateModalData.release_notes && (
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                      更新内容摘要：
+                    </div>
+                    <div
+                      style={{
+                        maxHeight: '180px',
+                        overflowY: 'auto',
+                        padding: '12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--bg-tertiary)',
+                        border: '1px solid var(--border)',
+                        fontSize: '12px',
+                        color: 'var(--text-main)',
+                        whiteSpace: 'pre-wrap',
+                        lineHeight: '1.6',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      {updateModalData.release_notes}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: '18px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(52, 211, 153, 0.08)',
+                  border: '1px solid rgba(52, 211, 153, 0.25)',
+                  fontSize: '13px',
+                  color: 'var(--text-main)',
+                  lineHeight: '1.6',
+                  textAlign: 'center',
+                }}
+              >
+                ✓ 您正在运行最新版本的 RimeTune (v{updateModalData.current_version})，无需更新。
+              </div>
+            )}
+
+            {/* 操作按钮栏 */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                onClick={() => setUpdateModalData(null)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-main)',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                关闭
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  openExternalUrl(updateModalData.release_url);
+                  setUpdateModalData(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--accent)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(56, 189, 248, 0.3)',
+                }}
+              >
+                <span>{updateModalData.has_update ? '前往 GitHub 下载更新' : '访问 GitHub Release 页面'}</span>
+                <ExternalLink size={14} />
+              </button>
+            </div>
           </div>
         </div>
       )}

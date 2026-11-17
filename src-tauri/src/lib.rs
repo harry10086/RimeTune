@@ -508,6 +508,109 @@ async fn set_typing_stats_enabled(user_dir: Option<String>, enabled: bool) -> Re
     .map_err(|e| format!("调度打字统计切换任务失败: {e}"))?
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct UpdateCheckResult {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub release_notes: String,
+    pub release_url: String,
+    pub published_at: String,
+}
+
+#[tauri::command]
+async fn check_for_updates() -> Result<UpdateCheckResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let current_version = env!("CARGO_PKG_VERSION").to_string();
+
+        // 访问 GitHub Releases API 获取最新版本
+        let url = "https://api.github.com/repos/harry10086/RimeTune/releases/latest";
+        
+        // 使用原生 HTTP 请求（在 Windows/Linux/macOS 下通用）
+        #[cfg(windows)]
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &format!(
+                r#"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object Net.WebClient; $wc.Headers.Add('User-Agent', 'RimeTune-App'); try {{ $wc.DownloadString('{}') }} catch {{ '' }}"#,
+                url
+            )])
+            .output()
+            .map_err(|e| format!("检查更新请求失败: {}", e))?;
+
+        #[cfg(not(windows))]
+        let output = std::process::Command::new("curl")
+            .args(["-s", "-H", "User-Agent: RimeTune-App", url])
+            .output()
+            .map_err(|e| format!("检查更新请求失败: {}", e))?;
+
+        let body = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if body.is_empty() || !body.starts_with('{') {
+            return Err("无法连接至 GitHub Releases 服务，请检查网络或稍后重试".to_string());
+        }
+
+        let json_val: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("解析版本信息失败: {}", e))?;
+
+        let tag_name = json_val.get("tag_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+
+        if tag_name.is_empty() {
+            return Err("未获取到有效的发布版本号".to_string());
+        }
+
+        let latest_version = tag_name.trim_start_matches('v').to_string();
+        let release_url = json_val.get("html_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("https://github.com/harry10086/RimeTune/releases")
+            .to_string();
+
+        let release_notes = json_val.get("body")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let published_at = json_val.get("published_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // 简要版本号对比 (major.minor.patch)
+        let parse_ver = |v: &str| -> Vec<u32> {
+            v.split('.')
+                .filter_map(|s| s.split(|c: char| !c.is_ascii_digit()).next().and_then(|n| n.parse::<u32>().ok()))
+                .collect()
+        };
+
+        let curr_parts = parse_ver(&current_version);
+        let latest_parts = parse_ver(&latest_version);
+
+        let mut has_update = false;
+        for i in 0..latest_parts.len().max(curr_parts.len()) {
+            let l = latest_parts.get(i).copied().unwrap_or(0);
+            let c = curr_parts.get(i).copied().unwrap_or(0);
+            if l > c {
+                has_update = true;
+                break;
+            } else if l < c {
+                has_update = false;
+                break;
+            }
+        }
+
+        Ok(UpdateCheckResult {
+            current_version,
+            latest_version,
+            has_update,
+            release_notes,
+            release_url,
+            published_at,
+        })
+    })
+    .await
+    .map_err(|e| format!("检查更新任务调度失败: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -553,6 +656,7 @@ pub fn run() {
             read_typing_stats,
             get_typing_stats_status,
             set_typing_stats_enabled,
+            check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running WeaselTune");
