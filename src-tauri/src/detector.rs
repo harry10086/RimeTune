@@ -403,30 +403,32 @@ pub fn inspect_environment() -> EnvironmentStatus {
         }
     }
 
-    // 1. 优先从 default.custom.yaml 获取用户当前配置的第一方案
-    let default_custom = user_path.join("default.custom.yaml");
-    if default_custom.exists() {
-        if let Ok(content) = std::fs::read_to_string(&default_custom) {
-            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                if let Some(patch) = val.get("patch") {
-                    if let Some(schema_list) = patch.get("schema_list").and_then(|l| l.as_sequence()) {
-                        if let Some(first) = schema_list.first() {
-                            if let Some(schema) = first.get("schema").and_then(|s| s.as_str()) {
-                                detected_id_opt = Some(schema.to_string());
+    // 1. 其次从 default.custom.yaml 获取用户当前配置的第一方案
+    if detected_id_opt.is_none() {
+        let default_custom = user_path.join("default.custom.yaml");
+        if default_custom.exists() {
+            if let Ok(content) = std::fs::read_to_string(&default_custom) {
+                if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                    if let Some(patch) = val.get("patch") {
+                        if let Some(schema_list) = patch.get("schema_list").and_then(|l| l.as_sequence()) {
+                            if let Some(first) = schema_list.first() {
+                                if let Some(schema) = first.get("schema").and_then(|s| s.as_str()) {
+                                    detected_id_opt = Some(schema.to_string());
+                                }
                             }
                         }
-                    }
-                    if detected_id_opt.is_none() {
-                        if let Some(map) = patch.as_mapping() {
-                            for (k, v) in map {
-                                if let Some(k_str) = k.as_str() {
-                                    if k_str.contains("schema_list") && k_str.contains("@0") {
-                                        if let Some(s) = v.get("schema").and_then(|s| s.as_str()) {
-                                            detected_id_opt = Some(s.to_string());
-                                            break;
-                                        } else if let Some(s) = v.as_str() {
-                                            detected_id_opt = Some(s.to_string());
-                                            break;
+                        if detected_id_opt.is_none() {
+                            if let Some(map) = patch.as_mapping() {
+                                for (k, v) in map {
+                                    if let Some(k_str) = k.as_str() {
+                                        if k_str.contains("schema_list") && k_str.contains("@0") {
+                                            if let Some(s) = v.get("schema").and_then(|s| s.as_str()) {
+                                                detected_id_opt = Some(s.to_string());
+                                                break;
+                                            } else if let Some(s) = v.as_str() {
+                                                detected_id_opt = Some(s.to_string());
+                                                break;
+                                            }
                                         }
                                     }
                                 }
