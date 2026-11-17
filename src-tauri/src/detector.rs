@@ -183,7 +183,7 @@ pub fn detect_weasel_paths() -> (Option<String>, Option<String>, Option<String>)
 pub fn inspect_environment() -> EnvironmentStatus {
     let (weasel_root_opt, user_dir_opt, deployer_opt) = detect_weasel_paths();
     let weasel_installed = deployer_opt.is_some();
-    let weasel_root = weasel_root_opt.unwrap_or_default();
+    let weasel_root = weasel_root_opt.clone().unwrap_or_default();
     let deployer_path = deployer_opt.unwrap_or_default();
     let rime_user_dir = user_dir_opt.unwrap_or_else(|| {
         #[cfg(windows)]
@@ -303,11 +303,52 @@ pub fn inspect_environment() -> EnvironmentStatus {
     }
 
     let user_path = Path::new(&rime_user_dir);
-    let is_rime_ice_detected = user_path.join("rime_ice.schema.yaml").exists()
-        || user_path.join("rime_frost.schema.yaml").exists()
-        || user_path.join("rime_mint.schema.yaml").exists()
-        || user_path.join("wanxiang.schema.yaml").exists()
-        || Path::new(r"D:\GitHub\rime-ice\rime_ice.schema.yaml").exists();
+
+    // 收集所有可能的数据与方案目录（用户目录 + 宿主共享程序目录）
+    let mut data_dirs = vec![user_path.to_path_buf()];
+    if let Some(ref wr) = weasel_root_opt {
+        let p = Path::new(wr).join("data");
+        if p.exists() && !data_dirs.contains(&p) {
+            data_dirs.push(p);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for dir in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
+            let p = PathBuf::from(dir);
+            if p.exists() && !data_dirs.contains(&p) {
+                data_dirs.push(p);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let p = PathBuf::from("/Library/Input Methods/Squirrel.app/Contents/SharedSupport");
+        if p.exists() && !data_dirs.contains(&p) {
+            data_dirs.push(p);
+        }
+    }
+    #[cfg(windows)]
+    {
+        for fallback in &[
+            r"C:\Program Files\Rime\weasel-0.17.0\data",
+            r"C:\Program Files\Rime\weasel\data",
+            r"C:\Program Files (x86)\Rime\weasel\data",
+        ] {
+            let fb_path = PathBuf::from(fallback);
+            if fb_path.exists() && !data_dirs.contains(&fb_path) {
+                data_dirs.push(fb_path);
+            }
+        }
+    }
+
+    // 探测当前是否存在现代增强型方案 (雾凇/白霜/薄荷/万象)
+    let is_rime_ice_detected = data_dirs.iter().any(|d| {
+        d.join("rime_ice.schema.yaml").exists()
+            || d.join("rime_frost.schema.yaml").exists()
+            || d.join("rime_mint.schema.yaml").exists()
+            || d.join("wanxiang.schema.yaml").exists()
+    });
 
     // 查找已存在的 custom.yaml 补丁文件
     let mut patch_files_found = Vec::new();
@@ -363,7 +404,7 @@ pub fn inspect_environment() -> EnvironmentStatus {
         }
     }
 
-    // 2. 其次从 default.yaml 获取默认第一方案
+    // 2. 其次从 user_dir/default.yaml 获取默认第一方案
     if detected_id_opt.is_none() {
         let default_yaml = user_path.join("default.yaml");
         if default_yaml.exists() {
@@ -381,32 +422,104 @@ pub fn inspect_environment() -> EnvironmentStatus {
         }
     }
 
-    // 3. 再次从用户目录直接存在的方案文件推断
+    // 2.5 再次从 build/default.yaml（构建部署产物中的 schema_list 反映部署后的真实激活状态）
     if detected_id_opt.is_none() {
-        let candidates = [
-            ("rime_frost.schema.yaml", "rime_frost"),
-            ("rime_mint.schema.yaml", "rime_mint"),
-            ("wanxiang.schema.yaml", "wanxiang"),
-            ("rime_ice.schema.yaml", "rime_ice"),
-        ];
-        for (file_name, id) in &candidates {
-            if user_path.join(file_name).exists() {
-                detected_id_opt = Some(id.to_string());
+        let build_default = user_path.join("build").join("default.yaml");
+        if build_default.exists() {
+            if let Ok(content) = std::fs::read_to_string(&build_default) {
+                if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                    if let Some(schema_list) = val.get("schema_list").and_then(|l| l.as_sequence()) {
+                        if let Some(first) = schema_list.first() {
+                            if let Some(schema) = first.get("schema").and_then(|s| s.as_str()) {
+                                detected_id_opt = Some(schema.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2.6 从系统预置 shared data_dirs 的 default.yaml 获取默认激活方案
+    if detected_id_opt.is_none() {
+        for dir in &data_dirs {
+            let shared_default = dir.join("default.yaml");
+            if shared_default.exists() {
+                if let Ok(content) = std::fs::read_to_string(&shared_default) {
+                    if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                        if let Some(schema_list) = val.get("schema_list").and_then(|l| l.as_sequence()) {
+                            if let Some(first) = schema_list.first() {
+                                if let Some(schema) = first.get("schema").and_then(|s| s.as_str()) {
+                                    detected_id_opt = Some(schema.to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 再次从用户目录直接存在的方案文件推断（排除反查辅码组件）
+    if detected_id_opt.is_none() {
+        if let Ok(entries) = std::fs::read_dir(user_path) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    if let Some(fname) = p.file_name().and_then(|f| f.to_str()) {
+                        if fname.ends_with(".schema.yaml") {
+                            let id = fname.replace(".schema.yaml", "");
+                            if id != "radical_pinyin" && id != "wanxiang_reverse" {
+                                detected_id_opt = Some(id);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. 再次从系统预置 shared data_dirs 直接存在的方案文件推断
+    if detected_id_opt.is_none() {
+        for dir in &data_dirs {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Some(fname) = p.file_name().and_then(|f| f.to_str()) {
+                            if fname.ends_with(".schema.yaml") {
+                                let id = fname.replace(".schema.yaml", "");
+                                if id != "radical_pinyin" && id != "wanxiang_reverse" {
+                                    detected_id_opt = Some(id);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if detected_id_opt.is_some() {
                 break;
             }
         }
     }
 
-    let active_schema_id = detected_id_opt.unwrap_or_else(|| "rime_ice".to_string());
+    // 兜底回退：官方标准经典朙月拼音 (luna_pinyin)
+    let active_schema_id = detected_id_opt.unwrap_or_else(|| "luna_pinyin".to_string());
 
     // 解析方案展示名称：优先从目标方案文件读 schema/name
     let mut active_schema_name = String::new();
-    let schema_file = user_path.join(format!("{}.schema.yaml", active_schema_id));
-    if schema_file.exists() {
-        if let Ok(content) = std::fs::read_to_string(&schema_file) {
-            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                if let Some(n) = val.get("schema").and_then(|s| s.get("name")).and_then(|v| v.as_str()) {
-                    active_schema_name = n.to_string();
+    for dir in &data_dirs {
+        let schema_file = dir.join(format!("{}.schema.yaml", active_schema_id));
+        if schema_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&schema_file) {
+                if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                    if let Some(n) = val.get("schema").and_then(|s| s.get("name")).and_then(|v| v.as_str()) {
+                        active_schema_name = n.to_string();
+                        break;
+                    }
                 }
             }
         }

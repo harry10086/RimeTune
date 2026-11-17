@@ -357,73 +357,116 @@ pub struct TypingStatsStatus {
 
 /// 读取输入法侧 `input_stats.lua` 写入的每日字数统计（只含日期与字数）。
 #[tauri::command]
-fn read_typing_stats(user_dir: Option<String>) -> Result<Vec<TypingStatsDay>, String> {
-    let actual_dir = resolve_actual_user_dir(user_dir.as_deref())?;
-    let path = std::path::Path::new(&actual_dir).join("typing_stats.jsonl");
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("读取 typing_stats.jsonl 失败: {e}"))?;
-
-    let mut daily: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
+async fn read_typing_stats(user_dir: Option<String>) -> Result<Vec<TypingStatsDay>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let actual_dir = resolve_actual_user_dir(user_dir.as_deref())?;
+        let path = std::path::Path::new(&actual_dir).join("typing_stats.jsonl");
+        if !path.exists() {
+            return Ok(Vec::new());
         }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        let Some(date) = value.get("date").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Some(chars) = value.get("chars").and_then(|v| v.as_u64()) else {
-            continue;
-        };
-        *daily.entry(date.to_string()).or_insert(0) += chars;
-    }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("读取 typing_stats.jsonl 失败: {e}"))?;
 
-    Ok(daily
-        .into_iter()
-        .map(|(date, chars)| TypingStatsDay { date, chars })
-        .collect())
+        let mut daily: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            let Some(date) = value.get("date").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(chars) = value.get("chars").and_then(|v| v.as_u64()) else {
+                continue;
+            };
+            *daily.entry(date.to_string()).or_insert(0) += chars;
+        }
+
+        Ok(daily
+            .into_iter()
+            .map(|(date, chars)| TypingStatsDay { date, chars })
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("异步执行读取打字统计失败: {e}"))?
 }
 
 /// 查询打字统计模块的启用与数据状态
 #[tauri::command]
-fn get_typing_stats_status(user_dir: Option<String>) -> Result<TypingStatsStatus, String> {
-    let actual_dir = resolve_actual_user_dir(user_dir.as_deref())?;
-    let u_path = std::path::Path::new(&actual_dir);
-    let lua_file = u_path.join("lua").join("input_stats.lua");
-    let lua_installed = lua_file.exists();
+async fn get_typing_stats_status(user_dir: Option<String>) -> Result<TypingStatsStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let actual_dir = resolve_actual_user_dir(user_dir.as_deref())?;
+        let u_path = std::path::Path::new(&actual_dir);
+        let lua_file = u_path.join("lua").join("input_stats.lua");
+        let lua_installed = lua_file.exists();
 
-    let stats_file = u_path.join("typing_stats.jsonl");
-    let data_exists = stats_file.exists();
+        let stats_file = u_path.join("typing_stats.jsonl");
+        let data_exists = stats_file.exists();
 
-    let mut total_chars: u64 = 0;
-    if data_exists {
-        if let Ok(content) = std::fs::read_to_string(&stats_file) {
-            for line in content.lines() {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) {
-                    if let Some(chars) = value.get("chars").and_then(|v| v.as_u64()) {
-                        total_chars += chars;
+        let mut total_chars: u64 = 0;
+        if data_exists {
+            if let Ok(content) = std::fs::read_to_string(&stats_file) {
+                for line in content.lines() {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                        if let Some(chars) = value.get("chars").and_then(|v| v.as_u64()) {
+                            total_chars += chars;
+                        }
                     }
                 }
             }
         }
-    }
 
-    let config = patcher::load_unified_config(&actual_dir);
-    let enabled = config.rime_ice_toggles.enable_typing_stats;
+        // 轻量直接检测打字统计是否在补丁中挂载，避免阻塞主线程运行庞大的 load_unified_config
+        let mut stats_patch_detected = false;
+        let check_files = [
+            "rime_ice.custom.yaml",
+            "rime_frost.custom.yaml",
+            "rime_mint.custom.yaml",
+            "wanxiang.custom.yaml",
+            "default.custom.yaml",
+            "luna_pinyin.custom.yaml",
+        ];
+        for fname in &check_files {
+            if let Ok(c) = std::fs::read_to_string(u_path.join(fname)) {
+                if c.contains("lua_filter@*input_stats") {
+                    stats_patch_detected = true;
+                    break;
+                }
+            }
+        }
+        if !stats_patch_detected {
+            if let Ok(entries) = std::fs::read_dir(u_path) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                        if name.ends_with(".custom.yaml") {
+                            if let Ok(c) = std::fs::read_to_string(&p) {
+                                if c.contains("lua_filter@*input_stats") {
+                                    stats_patch_detected = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-    Ok(TypingStatsStatus {
-        enabled,
-        lua_installed,
-        data_exists,
-        total_chars,
-        file_path: stats_file.to_string_lossy().to_string(),
+        let enabled = lua_installed && stats_patch_detected;
+
+        Ok(TypingStatsStatus {
+            enabled,
+            lua_installed,
+            data_exists,
+            total_chars,
+            file_path: stats_file.to_string_lossy().to_string(),
+        })
     })
+    .await
+    .map_err(|e| format!("异步执行查询打字统计状态失败: {e}"))?
 }
 
 /// 一键开启或停用打字统计，自动维护 Lua 采集器与补丁，并静默重新部署
@@ -511,9 +554,9 @@ mod tests {
     fn test_environment_detection() {
         let env = inspect_environment();
         println!("Detected env: {:?}", env);
-        assert!(env.weasel_installed);
-        assert!(!env.rime_user_dir.is_empty());
-        assert!(env.is_rime_ice_detected);
+        assert!(!env.platform.is_empty());
+        assert!(!env.active_schema_id.is_empty());
+        assert!(!env.active_schema_name.is_empty());
     }
 
     #[test]

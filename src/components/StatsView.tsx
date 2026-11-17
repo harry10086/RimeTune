@@ -160,7 +160,7 @@ export function StatsView({ userDir, showToast }: StatsViewProps) {
       case 4:
         return '#38bdf8';
       default:
-        return 'rgba(255, 255, 255, 0.05)';
+        return 'var(--bg-elevated)';
     }
   };
 

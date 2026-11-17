@@ -865,18 +865,32 @@ pub fn load_preset_color_schemes(user_dir: &str) -> Vec<ColorSchemeItem> {
     let mut list = Vec::new();
     let mut candidates = vec![
         PathBuf::from(user_dir).join("weasel.yaml"),
-        PathBuf::from(r"D:\GitHub\rime-ice\weasel.yaml"),
+        PathBuf::from(user_dir).join("squirrel.yaml"),
     ];
 
     let (detected_root, _, _) = crate::detector::detect_weasel_paths();
     if let Some(wr) = detected_root {
         candidates.push(Path::new(&wr).join("data").join("weasel.yaml"));
     }
-    for fallback in &[
-        r"C:\Program Files\Rime\weasel-0.17.0\data\weasel.yaml",
-        r"C:\Program Files\Rime\weasel\data\weasel.yaml",
-    ] {
-        candidates.push(PathBuf::from(fallback));
+    #[cfg(target_os = "linux")]
+    {
+        for dir in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
+            candidates.push(PathBuf::from(dir).join("weasel.yaml"));
+            candidates.push(PathBuf::from(dir).join("squirrel.yaml"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(PathBuf::from("/Library/Input Methods/Squirrel.app/Contents/SharedSupport/squirrel.yaml"));
+    }
+    #[cfg(windows)]
+    {
+        for fallback in &[
+            r"C:\Program Files\Rime\weasel-0.17.0\data\weasel.yaml",
+            r"C:\Program Files\Rime\weasel\data\weasel.yaml",
+        ] {
+            candidates.push(PathBuf::from(fallback));
+        }
     }
 
     for path in &candidates {
@@ -1020,24 +1034,7 @@ pub fn scan_actual_installed_schemas(user_dir: &str) -> Vec<SchemaItem> {
         }
     }
 
-    if active_ids.is_empty() {
-        // 单个主力方案保底：优先检测用户目录下实际存在的方案文件
-        for candidate in &["rime_frost", "rime_mint", "wanxiang", "rime_ice"] {
-            if u_path.join(format!("{}.schema.yaml", candidate)).exists() {
-                active_ids.push(candidate.to_string());
-                break;
-            }
-        }
-        if active_ids.is_empty() {
-            active_ids.push("rime_ice".to_string());
-        }
-    }
-
-    // 部件拆字 (radical_pinyin) 在日常输入中作为主方案的反查辅码使用，无须作为独立输入方案常驻选单
-    // 默认在方案列表中取消勾选部件拆字，放入未启用备选区，保留 melt_eng (Easy English Nano) 等实用方案
-    active_ids.retain(|id| id != "radical_pinyin");
-
-    // 确定所有需要扫描方案的目录（严格仅扫描用户配置根目录与小狼毫系统预置程序 data 根目录，绝对不扫描 build/backup/sync 等子目录）
+    // 确定所有需要扫描方案的目录（严格仅扫描用户配置根目录与系统预置共享 data 根目录，绝对不扫描 build/backup/sync 等子目录）
     let (detected_root, _, _) = crate::detector::detect_weasel_paths();
     let mut scan_dirs = vec![u_path.to_path_buf()];
     if let Some(wr) = detected_root {
@@ -1046,15 +1043,68 @@ pub fn scan_actual_installed_schemas(user_dir: &str) -> Vec<SchemaItem> {
             scan_dirs.push(p);
         }
     }
-    // 兼容常规小狼毫标准安装路径
-    for fallback in &[
-        r"C:\Program Files\Rime\weasel-0.17.0\data",
-        r"C:\Program Files\Rime\weasel\data",
-        r"C:\Program Files (x86)\Rime\weasel\data",
-    ] {
-        let fb_path = PathBuf::from(fallback);
-        if fb_path.exists() && !scan_dirs.contains(&fb_path) {
-            scan_dirs.push(fb_path);
+    #[cfg(target_os = "linux")]
+    {
+        for dir in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
+            let p = PathBuf::from(dir);
+            if p.exists() && !scan_dirs.contains(&p) {
+                scan_dirs.push(p);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let p = PathBuf::from("/Library/Input Methods/Squirrel.app/Contents/SharedSupport");
+        if p.exists() && !scan_dirs.contains(&p) {
+            scan_dirs.push(p);
+        }
+    }
+    #[cfg(windows)]
+    {
+        for fallback in &[
+            r"C:\Program Files\Rime\weasel-0.17.0\data",
+            r"C:\Program Files\Rime\weasel\data",
+            r"C:\Program Files (x86)\Rime\weasel\data",
+        ] {
+            let fb_path = PathBuf::from(fallback);
+            if fb_path.exists() && !scan_dirs.contains(&fb_path) {
+                scan_dirs.push(fb_path);
+            }
+        }
+    }
+
+    if active_ids.is_empty() {
+        // 单个主力方案保底：优先检测用户目录下实际存在的方案文件
+        for candidate in &["rime_frost", "rime_mint", "wanxiang", "rime_ice", "luna_pinyin"] {
+            if u_path.join(format!("{}.schema.yaml", candidate)).exists() {
+                active_ids.push(candidate.to_string());
+                break;
+            }
+        }
+        if active_ids.is_empty() {
+            // 扫描用户目录及系统共享目录中存在的第一个真实方案
+            for dir in &scan_dirs {
+                if let Ok(entries) = fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                            if fname.ends_with(".schema.yaml") {
+                                let id = fname.replace(".schema.yaml", "");
+                                if id != "radical_pinyin" && id != "wanxiang_reverse" {
+                                    active_ids.push(id);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if !active_ids.is_empty() {
+                    break;
+                }
+            }
+        }
+        if active_ids.is_empty() {
+            active_ids.push("luna_pinyin".to_string());
         }
     }
 
@@ -1153,14 +1203,14 @@ pub fn scan_actual_installed_schemas(user_dir: &str) -> Vec<SchemaItem> {
         }
     }
 
-    // 若扫描为空，至少保证存在 rime_ice
+    // 若扫描为空，以官方经典方案朙月拼音保底
     if schemas.is_empty() {
         schemas.push(SchemaItem {
-            id: "rime_ice".to_string(),
-            name: "雾凇拼音".to_string(),
+            id: "luna_pinyin".to_string(),
+            name: "朙月拼音".to_string(),
             enabled: true,
-            description: "现代汉语拼音方案，内置精准词库".to_string(),
-            file_path: u_path.join("rime_ice.schema.yaml").to_string_lossy().to_string(),
+            description: "Rime 官方经典全拼输入方案".to_string(),
+            file_path: u_path.join("luna_pinyin.schema.yaml").to_string_lossy().to_string(),
         });
     }
 
@@ -1186,7 +1236,7 @@ pub fn enumerate_system_fonts() -> Vec<String> {
 
     let mut fonts = BTreeSet::new();
 
-    // 默认高频优质中文与英文无衬线/等宽字体保底
+    // 跨平台高频优质中文与英文无衬线/等宽字体保底
     let curated = [
         "Microsoft YaHei UI",
         "Microsoft YaHei",
@@ -1195,10 +1245,15 @@ pub fn enumerate_system_fonts() -> Vec<String> {
         "LXGW WenKai",
         "霞鹜文楷",
         "PingFang SC",
+        "Hiragino Sans GB",
         "DengXian",
         "Source Han Sans CN",
         "思源黑体",
+        "Noto Sans CJK SC",
         "Noto Sans SC",
+        "WenQuanYi Micro Hei",
+        "DejaVu Sans",
+        "Noto Sans Mono",
         "Fira Code",
         "JetBrains Mono",
         "Cascadia Code",
@@ -1234,22 +1289,87 @@ pub fn enumerate_system_fonts() -> Vec<String> {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        // 1. 调用系统 fontconfig 命令 `fc-list : family`
+        if let Ok(output) = std::process::Command::new("fc-list").arg(":").arg("family").output() {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    for family in line.split(',') {
+                        let name = family.trim();
+                        if !name.is_empty() && !name.starts_with('@') && name.len() > 1 {
+                            fonts.insert(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        for dir in &["/Library/Fonts", "/System/Library/Fonts"] {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if !stem.starts_with('.') {
+                            fonts.insert(stem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let mut list: Vec<String> = fonts.into_iter().collect();
-    let priority = [
-        "Microsoft YaHei UI",
-        "Microsoft YaHei",
-        "Segoe UI",
-        "HarmonyOS Sans SC",
-        "LXGW WenKai",
-        "霞鹜文楷",
-        "PingFang SC",
-        "DengXian",
-        "思源黑体",
-        "Source Han Sans CN",
-        "Fira Code",
-        "JetBrains Mono",
-        "Cascadia Code",
-    ];
+    let priority: &[&str] = if cfg!(target_os = "linux") {
+        &[
+            "Noto Sans CJK SC",
+            "Noto Sans SC",
+            "Source Han Sans CN",
+            "思源黑体",
+            "WenQuanYi Micro Hei",
+            "HarmonyOS Sans SC",
+            "霞鹜文楷",
+            "LXGW WenKai",
+            "DejaVu Sans",
+            "Noto Sans Mono",
+            "Fira Code",
+            "JetBrains Mono",
+        ]
+    } else if cfg!(target_os = "macos") {
+        &[
+            "PingFang SC",
+            "Hiragino Sans GB",
+            "SF Pro",
+            "思源黑体",
+            "Source Han Sans CN",
+            "霞鹜文楷",
+            "LXGW WenKai",
+            "Menlo",
+            "Monaco",
+            "Fira Code",
+            "JetBrains Mono",
+        ]
+    } else {
+        &[
+            "Microsoft YaHei UI",
+            "Microsoft YaHei",
+            "Segoe UI",
+            "HarmonyOS Sans SC",
+            "LXGW WenKai",
+            "霞鹜文楷",
+            "PingFang SC",
+            "DengXian",
+            "思源黑体",
+            "Source Han Sans CN",
+            "Fira Code",
+            "JetBrains Mono",
+            "Cascadia Code",
+        ]
+    };
 
     list.sort_by(|a, b| {
         let a_pos = priority.iter().position(|&x| x == a.as_str()).unwrap_or(usize::MAX);
@@ -4159,7 +4279,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     for s in &config.schemas {
         if s.enabled && !handled_ids.contains(&s.id.as_str()) && !s.id.starts_with("wanxiang") {
             let schema_file = u_path.join(format!("{}.schema.yaml", s.id));
-            if schema_file.exists() {
+            if schema_file.exists() || Path::new(&s.file_path).exists() {
                 let mut other_yaml = String::new();
                 other_yaml.push_str(&format!("# WeaselTune 生成的方案定制补丁: {}\n", s.name));
                 other_yaml.push_str("patch:\n");

@@ -61,9 +61,30 @@ pub fn run_weasel_command(
         };
     }
 
-    // 2. 构造并启动子进程，设置 Windows CREATE_NO_WINDOW 标志避免控制台弹窗与标准流挂起
+    // 2. 构造并启动子进程，适配不同操作系统和部署器程序
     let mut cmd = Command::new(&deployer_path);
-    cmd.arg(arg);
+
+    let is_fcitx5 = deployer_path.contains("fcitx5-remote");
+    let is_rime_deployer = deployer_path.contains("rime_deployer");
+    let is_squirrel = deployer_path.contains("Squirrel");
+
+    if is_fcitx5 {
+        // fcitx5-remote: -r 重新加载配置
+        cmd.arg("-r");
+    } else if is_rime_deployer {
+        // rime_deployer: --build 重新构建，或 --sync 同步
+        if arg == "/sync" {
+            cmd.arg("--sync");
+        } else {
+            cmd.arg("--build");
+        }
+    } else if is_squirrel {
+        // Squirrel: --reload 重新加载
+        cmd.arg("--reload");
+    } else {
+        // Windows WeaselDeployer: /deploy 或 /sync
+        cmd.arg(arg);
+    }
 
     #[cfg(windows)]
     {

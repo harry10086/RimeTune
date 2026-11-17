@@ -545,7 +545,7 @@ export function App() {
             </span>
           </div>
           <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            主方案: {env?.active_schema_name || '雾凇拼音'}
+            主方案: {env?.active_schema_name || '朙月拼音'}
           </div>
         </div>
       </aside>

@@ -187,10 +187,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </div>
           <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-main)' }}>
-            {env?.active_schema_name || '雾凇拼音'}
+            {env?.active_schema_name || '朙月拼音'}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-dim)' }} className="mono">
-            schema_id: {env?.active_schema_id || 'rime_ice'}
+            schema_id: {env?.active_schema_id || 'luna_pinyin'}
           </div>
         </div>
 

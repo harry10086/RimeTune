@@ -282,6 +282,20 @@ RimeTune/
 
 ## 📦 版本更新日志
 
+### v0.3.3 版本更新摘要
+ * 🐧 **Linux (Fedora KDE 45 等) 原生输入方案精准识别与探测**：
+   - **清除硬编码误报**：彻底清除本地调试路径与对“雾凇拼音”的无条件硬编码兜底；
+   - **系统共享目录纳入方案池**：自动扫描 Linux 系统标准方案共享目录（`/usr/share/rime-data/`、`/usr/local/share/rime-data/`、`/usr/share/rime/`），精准识别原生经典朙月拼音（`luna_pinyin`）及系统实际挂载的主方案；
+   - **多级递进探测链**：构建 `default.custom.yaml` ➔ 用户 `default.yaml` ➔ `build/default.yaml` ➔ 系统共享 `default.yaml` ➔ 用户/系统目录下真实存在方案 ➔ 官方标准朙月拼音的精准解析链条，仪表盘与状态栏准确显示当前真实方案。
+ * ⚡ **彻底解决「打字统计」界面点击卡死挂起 Bug**：
+   - **后台全异步线程调度**：将打字统计数据与状态查询重构为 `async fn`，并由 `tauri::async_runtime::spawn_blocking` 独立工作池执行，杜绝在 Tauri 主线程上运行重 IO 操作；
+   - **轻量状态探测**：移除原先在查询统计状态时全量运行整个重量级统一配置解析的冗余行为，改为轻量即时文件检测；
+   - **跨平台重载/部署指令精准适配**：针对 Linux 环境精准调用 `fcitx5-remote -r`（配置重载）与 `rime_deployer --build`，彻底解决旧版向 Linux 部署器发送 Windows 专属 `/deploy` 参数引发的异常挂起与超时循环。
+ * 🎨 **外观与皮肤全平台高对比度与自适应排版优化**：
+   - **系统字体库对比度修复**：修复字体库网格按钮在浅色/亮色模式下白底白字看不清的问题，全面采用自适应高对比语义颜色变量；
+   - **平台原生字体智能推荐**：Linux 下自动推荐展示 Linux 常用开源优质字体（思源黑体、Noto Sans CJK SC、Source Han Sans CN、文泉驿微米黑、DejaVu Sans、Noto Sans Mono、霞鹜文楷等），macOS 下推荐展示苹方等原生字体；
+   - **彻底根除断字折行**：为“拼音/释义字号 (comment_font_point)”、状态徽章“系统原生”、“12 pt”以及“行内预编辑”徽章“已开启 · 嵌入光标处”添加强制防换行与弹性间距，彻底消除“生”、“处”、“pt”孤字掉行问题。
+
 ### v0.3.2 版本更新摘要
  * 🛡️ **彻底解决万象拼音选项重启丢失问题 (Issue #3)**：
    - **杜绝 YAML Duplicate Key 根因**：全面重构方案开关定制逻辑，采用 `BTreeMap<usize, u64>` 严格按索引去重与升序写入 `switches/@{idx}/reset` 补丁，彻底消除 `wanxiang_lite` 等子方案因回退索引撞车产生重复 key 引发 `serde_yaml` 反序列化报错并丢失配置的缺陷；

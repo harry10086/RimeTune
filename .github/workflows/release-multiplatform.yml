@@ -108,19 +108,20 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev build-essential libfuse2
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev build-essential libfuse2 rpm
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build Linux Bundles (Deb & AppImage)
+      - name: Build Linux Bundles (Deb, AppImage & RPM)
         run: npm run tauri build
 
       - name: Stage Linux Artifacts
         run: |
           mkdir -p staging-linux
-          cp src-tauri/target/release/bundle/deb/*.deb staging-linux/
-          cp src-tauri/target/release/bundle/appimage/*.AppImage staging-linux/
+          cp src-tauri/target/release/bundle/deb/*.deb staging-linux/ || true
+          cp src-tauri/target/release/bundle/appimage/*.AppImage staging-linux/ || true
+          cp src-tauri/target/release/bundle/rpm/*.rpm staging-linux/ || true
           ls -la staging-linux/
 
       - name: Upload Linux Artifacts
