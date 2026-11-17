@@ -528,13 +528,23 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
         
         // 使用原生 HTTP 请求（在 Windows/Linux/macOS 下通用）
         #[cfg(windows)]
-        let output = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &format!(
-                r#"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object Net.WebClient; $wc.Headers.Add('User-Agent', 'RimeTune-App'); try {{ $wc.DownloadString('{}') }} catch {{ '' }}"#,
-                url
-            )])
+        let output = {
+            use std::os::windows::process::CommandExt;
+            let mut cmd = std::process::Command::new("powershell");
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW: 静默执行，彻底杜绝黑色控制台窗口闪烁
+            cmd.args([
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &format!(
+                    r#"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object Net.WebClient; $wc.Headers.Add('User-Agent', 'RimeTune-App'); try {{ $wc.DownloadString('{}') }} catch {{ '' }}"#,
+                    url
+                ),
+            ])
             .output()
-            .map_err(|e| format!("检查更新请求失败: {}", e))?;
+            .map_err(|e| format!("检查更新请求失败: {}", e))?
+        };
 
         #[cfg(not(windows))]
         let output = std::process::Command::new("curl")
