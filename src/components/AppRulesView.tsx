@@ -330,7 +330,7 @@ export const AppRulesView: React.FC<AppRulesViewProps> = ({
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
             <thead>
               <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                <th style={{ padding: '14px 18px', width: '38%', fontWeight: 700 }}>应用程序名 (.exe)</th>
+                <th style={{ padding: '14px 18px', width: '38%', fontWeight: 700 }}>应用程序 / 进程名</th>
                 <th style={{ padding: '14px 18px', width: '26%', fontWeight: 700, textAlign: 'center' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                     <span>默认英文 (ascii_mode)</span>

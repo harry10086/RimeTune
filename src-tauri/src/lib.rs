@@ -175,10 +175,22 @@ fn open_file_in_editor(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("启动系统编辑器失败: {}", e))?;
+        // 优先尝试 xdg-open
+        let xdg_res = std::process::Command::new("xdg-open").arg(&path).spawn();
+        if xdg_res.is_err() {
+            // 回退尝试 Linux 桌面常见图形文本编辑器 (KDE Kate/KWrite, GNOME Text Editor/GEdit, XFCE Mousepad 等)
+            let editors = ["kate", "gedit", "gnome-text-editor", "kwrite", "mousepad", "xed", "leafpad"];
+            let mut launched = false;
+            for ed in &editors {
+                if std::process::Command::new(ed).arg(&path).spawn().is_ok() {
+                    launched = true;
+                    break;
+                }
+            }
+            if !launched {
+                return Err("无法打开系统文本编辑器，未找到 xdg-open 或可用图形编辑器".to_string());
+            }
+        }
     }
 
     Ok(())

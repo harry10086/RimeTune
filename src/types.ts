@@ -202,6 +202,7 @@ export interface SchemaDictMountsInfo {
   schema_name: string;
   primary_dict_file: string;
   primary_dict_path: string;
+  primary_dict_exists?: boolean;
   mounted_tables: SchemaDictMountItem[];
   is_ice_extended_managed: boolean;
 }

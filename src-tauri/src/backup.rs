@@ -19,7 +19,20 @@ pub struct DiffItem {
 }
 
 pub fn get_backups_dir(user_dir: &str) -> PathBuf {
-    PathBuf::from(user_dir).join("weaseltune_backups")
+    let u_path = PathBuf::from(user_dir);
+    let new_dir = u_path.join("rimetune_backups");
+    let old_dir = u_path.join("weaseltune_backups");
+    // 如果历史旧目录存在且新目录尚未创建，平滑重命名迁移为新目录
+    if old_dir.exists() && !new_dir.exists() {
+        let _ = fs::rename(&old_dir, &new_dir);
+    }
+    if new_dir.exists() {
+        new_dir
+    } else if old_dir.exists() {
+        old_dir
+    } else {
+        new_dir
+    }
 }
 
 pub fn create_snapshot(user_dir: &str, note: Option<&str>) -> Result<String, String> {
@@ -45,10 +58,12 @@ pub fn create_snapshot(user_dir: &str, note: Option<&str>) -> Result<String, Str
     // 拷贝所有 *.custom.yaml 和 custom_phrase*.txt 文件
     let mut target_files = std::collections::BTreeSet::new();
     let important_files = [
-        "weasel.custom.yaml",
         "default.custom.yaml",
+        "weasel.custom.yaml",
+        "squirrel.custom.yaml",
         "rime_ice.custom.yaml",
         "custom_phrase.txt",
+        "custom_phrase_double.txt",
     ];
     for f in &important_files {
         target_files.insert(f.to_string());
@@ -159,10 +174,12 @@ pub fn compare_diff(user_dir: &str, snapshot_id: &str) -> Vec<DiffItem> {
     let mut file_set = std::collections::BTreeSet::new();
 
     let default_check = [
-        "weasel.custom.yaml",
         "default.custom.yaml",
+        "weasel.custom.yaml",
+        "squirrel.custom.yaml",
         "rime_ice.custom.yaml",
         "custom_phrase.txt",
+        "custom_phrase_double.txt",
     ];
     for f in &default_check {
         file_set.insert(f.to_string());

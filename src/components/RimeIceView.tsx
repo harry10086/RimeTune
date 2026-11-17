@@ -62,6 +62,13 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
     return schemas.filter((s) => s.id !== 'radical_pinyin' && s.id !== 'wanxiang_reverse');
   }, [schemas]);
 
+  // 专门用于顶部“方案特色智能功能与快捷指令手册”的手册浏览方案（独立于词库挂载与开关配置，仅用于手册查阅）
+  const [manualSchemaId, setManualSchemaId] = useState<string>(() => {
+    const firstEnabled = validSchemas.find((s) => s.enabled);
+    return firstEnabled ? firstEnabled.id : (validSchemas[0]?.id || 'rime_ice');
+  });
+
+  // 词库与配置主方案（用于下方的字表挂载、外挂词库与专有开关配置）
   const [selectedSchemaId, setSelectedSchemaId] = useState<string>(() => {
     const firstEnabled = validSchemas.find((s) => s.enabled);
     return firstEnabled ? firstEnabled.id : (validSchemas[0]?.id || 'rime_ice');
@@ -71,6 +78,9 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
     const enabledList = validSchemas.filter((s) => s.enabled);
     if (enabledList.length > 0 && !validSchemas.some((s) => s.id === selectedSchemaId)) {
       setSelectedSchemaId(enabledList[0].id);
+    }
+    if (enabledList.length > 0 && !validSchemas.some((s) => s.id === manualSchemaId)) {
+      setManualSchemaId(enabledList[0].id);
     }
   }, [validSchemas]);
 
@@ -170,17 +180,22 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
     }
   };
 
+  // 专门拉取“方案特色智能功能与快捷指令手册”（切换仅改变手册展示，绝不干扰当前方案配置）
   useEffect(() => {
     if (!userDir) return;
     setFeaturesLoading(true);
     invoke<SchemeFeatureItem[]>('get_schema_features', {
       userDir,
-      schemaId: selectedSchemaId,
+      schemaId: manualSchemaId,
     })
       .then((res) => setFeatures(res))
       .catch((err) => console.error('Failed to get schema features:', err))
       .finally(() => setFeaturesLoading(false));
+  }, [userDir, manualSchemaId]);
 
+  // 拉取当前主方案的词库挂载、外挂词库以及模糊音/特性开关状态
+  useEffect(() => {
+    if (!userDir) return;
     setMountsLoading(true);
     invoke<SchemaDictMountsInfo>('get_schema_dict_mounts', {
       userDir,
@@ -304,12 +319,12 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                 {(validSchemas.filter((s) => s.enabled).length > 0 ? validSchemas.filter((s) => s.enabled) : validSchemas.slice(0, 3)).map((s) => {
-                  const isCur = s.id === selectedSchemaId;
+                  const isCur = s.id === manualSchemaId;
                   return (
                     <button
                       key={s.id}
                       type="button"
-                      onClick={() => setSelectedSchemaId(s.id)}
+                      onClick={() => setManualSchemaId(s.id)}
                       style={{
                         padding: '4px 11px',
                         borderRadius: '6px',
@@ -330,17 +345,17 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
 
               {validSchemas.filter((s) => !s.enabled).length > 0 && (
                 <select
-                  value={validSchemas.filter((s) => s.enabled).some((s) => s.id === selectedSchemaId) ? '' : selectedSchemaId}
+                  value={validSchemas.filter((s) => s.enabled).some((s) => s.id === manualSchemaId) ? '' : manualSchemaId}
                   onChange={(e) => {
-                    if (e.target.value) setSelectedSchemaId(e.target.value);
+                    if (e.target.value) setManualSchemaId(e.target.value);
                   }}
                   style={{
                     padding: '4px 10px',
                     borderRadius: '6px',
                     fontSize: '12px',
                     backgroundColor: 'var(--bg-tertiary)',
-                    color: !validSchemas.filter((s) => s.enabled).some((s) => s.id === selectedSchemaId) ? '#38bdf8' : 'var(--text-dim)',
-                    border: !validSchemas.filter((s) => s.enabled).some((s) => s.id === selectedSchemaId) ? '1px solid #38bdf8' : '1px solid var(--border)',
+                    color: !validSchemas.filter((s) => s.enabled).some((s) => s.id === manualSchemaId) ? '#38bdf8' : 'var(--text-dim)',
+                    border: !validSchemas.filter((s) => s.enabled).some((s) => s.id === manualSchemaId) ? '1px solid #38bdf8' : '1px solid var(--border)',
                     cursor: 'pointer',
                     outline: 'none',
                   }}
@@ -357,7 +372,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
         </div>
 
         <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-          根据您选择的输入方案（如雾凇拼音、白霜拼音、薄荷输入法、万象输入法等），自动智能解析其内置的引导前缀、部件拆字反查、农历历法、金额转换及快捷指令，即学即用。
+          按输入方案（如雾凇拼音、白霜拼音、薄荷输入法、万象拼音等）智能展示其内置的引导前缀、部件拆字反查、农历历法、金额转换及快捷指令说明手册（此处切换仅供查阅参考，不影响当前生效方案与词库）。
         </p>
 
         {/* 分类过滤标签 */}
@@ -481,9 +496,33 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
       {/* 词库与字表定制专区 (按方案动态智能解析真实主词库) */}
       <div className="glass-panel" style={{ padding: '24px', borderRadius: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '17px', fontWeight: 700, color: 'var(--text-main)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '17px', fontWeight: 700, color: 'var(--text-main)', flexWrap: 'wrap' }}>
             <Database size={20} color="#34d399" />
             <span>扩展词库与字表挂载清单</span>
+            {validSchemas.length > 1 && (
+              <select
+                value={selectedSchemaId}
+                onChange={(e) => setSelectedSchemaId(e.target.value)}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  backgroundColor: 'var(--bg-tertiary)',
+                  color: '#34d399',
+                  border: '1px solid rgba(52, 211, 153, 0.4)',
+                  cursor: 'pointer',
+                  outline: 'none',
+                }}
+                title="选择要管理与配置词库挂载的目标方案"
+              >
+                {validSchemas.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} {s.enabled ? '(当前方案)' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
             {mountsInfo && (
               <span
                 style={{
@@ -504,12 +543,19 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
           {mountsInfo && mountsInfo.primary_dict_path && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span className="mono" style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
-                入口文件: {mountsInfo.primary_dict_file}
+                入口文件: {mountsInfo.primary_dict_file} {mountsInfo.primary_dict_exists === false && '(未检测到文件)'}
               </span>
               <button
                 type="button"
-                onClick={() => invoke('open_file_in_editor', { path: mountsInfo.primary_dict_path })}
-                title="在编辑器中直接查看或修改此方案主词库入口文件"
+                onClick={async () => {
+                  try {
+                    await invoke('open_file_in_editor', { path: mountsInfo.primary_dict_path });
+                  } catch (err: any) {
+                    showNotice(`无法打开主词库文件: ${err?.toString() || err}`);
+                  }
+                }}
+                disabled={mountsInfo.primary_dict_exists === false}
+                title={mountsInfo.primary_dict_exists === false ? '主词库文件不存在于系统或用户目录中' : '在系统文本编辑器中直接查看或修改此方案主词库入口文件'}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -518,10 +564,11 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
                   borderRadius: '6px',
                   backgroundColor: 'var(--bg-tertiary)',
                   border: '1px solid var(--border)',
-                  color: 'var(--accent)',
+                  color: mountsInfo.primary_dict_exists === false ? 'var(--text-dim)' : 'var(--accent)',
                   fontSize: '11px',
                   fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: mountsInfo.primary_dict_exists === false ? 'not-allowed' : 'pointer',
+                  opacity: mountsInfo.primary_dict_exists === false ? 0.6 : 1,
                 }}
               >
                 <ExternalLink size={12} /> 打开主词库入口

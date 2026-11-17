@@ -368,6 +368,7 @@ pub struct SchemaDictMountsInfo {
     pub schema_name: String,
     pub primary_dict_file: String,
     pub primary_dict_path: String,
+    pub primary_dict_exists: bool,
     pub mounted_tables: Vec<SchemaDictMountItem>,
     pub is_ice_extended_managed: bool,
 }
@@ -1970,7 +1971,34 @@ pub fn detect_schema_dict_mounts(user_dir: &str, schema_id: &str) -> SchemaDictM
     let mut schema_name = s_id.to_string();
     let mut primary_dict_name = s_id.to_string();
 
-    let schema_file = u_path.join(format!("{}.schema.yaml", s_id));
+    let mut schema_file = u_path.join(format!("{}.schema.yaml", s_id));
+    if !schema_file.exists() {
+        let mut candidate_schema_paths = vec![
+            u_path.join("build").join(format!("{}.schema.yaml", s_id)),
+            u_path.join("custom").join(format!("{}.schema.yaml", s_id)),
+        ];
+        #[cfg(target_os = "linux")]
+        {
+            for dir in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
+                candidate_schema_paths.push(Path::new(dir).join(format!("{}.schema.yaml", s_id)));
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            candidate_schema_paths.push(Path::new("/Library/Input Methods/Squirrel.app/Contents/SharedSupport").join(format!("{}.schema.yaml", s_id)));
+        }
+        let (detected_root, _, _) = crate::detector::detect_weasel_paths();
+        if let Some(ref wr) = detected_root {
+            candidate_schema_paths.push(Path::new(wr).join("data").join(format!("{}.schema.yaml", s_id)));
+        }
+        for csp in candidate_schema_paths {
+            if csp.exists() {
+                schema_file = csp;
+                break;
+            }
+        }
+    }
+
     if schema_file.exists() {
         if let Ok(content) = fs::read_to_string(&schema_file) {
             if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
@@ -2000,6 +2028,8 @@ pub fn detect_schema_dict_mounts(user_dir: &str, schema_id: &str) -> SchemaDictM
         format!("dicts/{}.dict.yaml", primary_dict_name),
         format!("dicts/{}.extended.dict.yaml", primary_dict_name),
         format!("{}.extended.dict.yaml", primary_dict_name),
+        format!("{}.dict.yaml", s_id.replace("_simp", "")),
+        format!("{}.dict.yaml", primary_dict_name.replace("_simp", "")),
     ];
 
     let mut found_dict_rel = String::new();
@@ -2024,6 +2054,38 @@ pub fn detect_schema_dict_mounts(user_dir: &str, schema_id: &str) -> SchemaDictM
                     found_dict_path = entry.path();
                     break;
                 }
+            }
+        }
+    }
+
+    // 如果在用户目录中仍未找到，查找系统共享目录与方案支持库
+    if found_dict_rel.is_empty() {
+        let mut shared_dirs: Vec<PathBuf> = Vec::new();
+        #[cfg(target_os = "linux")]
+        {
+            for d in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
+                shared_dirs.push(PathBuf::from(d));
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            shared_dirs.push(PathBuf::from("/Library/Input Methods/Squirrel.app/Contents/SharedSupport"));
+        }
+        let (detected_root, _, _) = crate::detector::detect_weasel_paths();
+        if let Some(ref wr) = detected_root {
+            shared_dirs.push(PathBuf::from(wr).join("data"));
+        }
+        for sd in shared_dirs {
+            for c in &candidates {
+                let p = sd.join(c);
+                if p.exists() {
+                    found_dict_rel = c.clone();
+                    found_dict_path = p;
+                    break;
+                }
+            }
+            if !found_dict_rel.is_empty() {
+                break;
             }
         }
     }
@@ -2191,11 +2253,14 @@ pub fn detect_schema_dict_mounts(user_dir: &str, schema_id: &str) -> SchemaDictM
         }
     }
 
+    let primary_dict_exists = found_dict_path.exists();
+
     SchemaDictMountsInfo {
         schema_id: s_id.to_string(),
         schema_name,
         primary_dict_file: found_dict_rel,
         primary_dict_path: found_dict_path.to_string_lossy().to_string(),
+        primary_dict_exists,
         mounted_tables,
         is_ice_extended_managed,
     }
@@ -3313,15 +3378,6 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
         }
     }
 
-    if app_options.is_empty() {
-        app_options = vec![
-            AppOptionItem { app_name: "cmd.exe".to_string(), ascii_mode: true, inline_preedit: false },
-            AppOptionItem { app_name: "powershell.exe".to_string(), ascii_mode: true, inline_preedit: false },
-            AppOptionItem { app_name: "windowsterminal.exe".to_string(), ascii_mode: true, inline_preedit: false },
-            AppOptionItem { app_name: "code.exe".to_string(), ascii_mode: false, inline_preedit: true },
-        ];
-    }
-
     // 2. 读取 default.custom.yaml 真实方案及按键
     let schemas = scan_actual_installed_schemas(user_dir);
     let default_custom = u_path.join("default.custom.yaml");
@@ -3354,8 +3410,78 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                             }
                         }
                     }
+
+                    // 支持从 default.custom.yaml 中读取 app_options (Linux / 全局配置规范)
+                    if let Some(patch_map) = patch.as_mapping() {
+                        let mut default_app_map: std::collections::BTreeMap<String, (bool, bool)> = std::collections::BTreeMap::new();
+                        for (k, v) in patch_map {
+                            if let Some(key_str) = k.as_str() {
+                                if key_str.starts_with("app_options/") {
+                                    let sub = key_str.replace("app_options/", "");
+                                    if sub.ends_with("/ascii_mode") {
+                                        let app_name = sub.replace("/ascii_mode", "");
+                                        let entry = default_app_map.entry(app_name).or_insert((false, false));
+                                        if let Some(b) = v.as_bool() { entry.0 = b; }
+                                    } else if sub.ends_with("/inline_preedit") {
+                                        let app_name = sub.replace("/inline_preedit", "");
+                                        let entry = default_app_map.entry(app_name).or_insert((false, false));
+                                        if let Some(b) = v.as_bool() { entry.1 = b; }
+                                    } else if let Some(m) = v.as_mapping() {
+                                        let ascii = m.get(&serde_yaml::Value::String("ascii_mode".to_string())).and_then(|b| b.as_bool()).unwrap_or(false);
+                                        let inline = m.get(&serde_yaml::Value::String("inline_preedit".to_string())).and_then(|b| b.as_bool()).unwrap_or(false);
+                                        default_app_map.insert(sub, (ascii, inline));
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(app_obj) = patch.get(&serde_yaml::Value::String("app_options".to_string())).and_then(|o| o.as_mapping()) {
+                            for (app_key, app_val) in app_obj {
+                                if let Some(app_name) = app_key.as_str() {
+                                    let ascii = app_val.get(&serde_yaml::Value::String("ascii_mode".to_string())).and_then(|v| v.as_bool()).unwrap_or(false);
+                                    let inline = app_val.get(&serde_yaml::Value::String("inline_preedit".to_string())).and_then(|v| v.as_bool()).unwrap_or(false);
+                                    default_app_map.insert(app_name.to_string(), (ascii, inline));
+                                }
+                            }
+                        }
+                        for (name, (ascii, inline)) in default_app_map {
+                            if !app_options.iter().any(|a| a.app_name == name) {
+                                app_options.push(AppOptionItem {
+                                    app_name: name,
+                                    ascii_mode: ascii,
+                                    inline_preedit: inline,
+                                });
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    if app_options.is_empty() {
+        let is_linux = cfg!(target_os = "linux") || user_dir.contains("fcitx5") || user_dir.contains("ibus");
+        let is_macos = cfg!(target_os = "macos") || user_dir.contains("Library/Rime");
+
+        if is_linux {
+            app_options = vec![
+                AppOptionItem { app_name: "gnome-terminal".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "konsole".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "kitty".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "code".to_string(), ascii_mode: false, inline_preedit: true },
+            ];
+        } else if is_macos {
+            app_options = vec![
+                AppOptionItem { app_name: "com.apple.Terminal".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "com.googlecode.iterm2".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "com.microsoft.VSCode".to_string(), ascii_mode: false, inline_preedit: true },
+            ];
+        } else {
+            app_options = vec![
+                AppOptionItem { app_name: "cmd.exe".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "powershell.exe".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "windowsterminal.exe".to_string(), ascii_mode: true, inline_preedit: false },
+                AppOptionItem { app_name: "code.exe".to_string(), ascii_mode: false, inline_preedit: true },
+            ];
         }
     }
 
@@ -3753,28 +3879,50 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     }
 
-    validate_yaml(&weasel_yaml, "weasel.custom.yaml")?;
-    fs::write(u_path.join("weasel.custom.yaml"), &weasel_yaml)
-        .map_err(|e| format!("写入 weasel.custom.yaml 失败: {}", e))?;
+    let is_linux = cfg!(target_os = "linux") || user_dir.contains("fcitx5") || user_dir.contains("ibus");
+    let is_macos = cfg!(target_os = "macos") || user_dir.contains("Library/Rime");
 
-    // macOS 鼠须管同步写入 squirrel.custom.yaml；若用户目录下已存在 squirrel.custom.yaml 也保持同步
-    #[cfg(target_os = "macos")]
-    {
-        let _ = fs::write(u_path.join("squirrel.custom.yaml"), &weasel_yaml);
+    if is_macos {
+        validate_yaml(&weasel_yaml, "squirrel.custom.yaml")?;
+        fs::write(u_path.join("squirrel.custom.yaml"), &weasel_yaml)
+            .map_err(|e| format!("写入 squirrel.custom.yaml 失败: {}", e))?;
+    } else if !is_linux {
+        validate_yaml(&weasel_yaml, "weasel.custom.yaml")?;
+        fs::write(u_path.join("weasel.custom.yaml"), &weasel_yaml)
+            .map_err(|e| format!("写入 weasel.custom.yaml 失败: {}", e))?;
     }
-    if u_path.join("squirrel.custom.yaml").exists() {
-        let _ = fs::write(u_path.join("squirrel.custom.yaml"), &weasel_yaml);
+
+    // 在 Linux 环境下清理可能残留的历史 weasel.custom.yaml
+    if is_linux && u_path.join("weasel.custom.yaml").exists() {
+        let _ = fs::remove_file(u_path.join("weasel.custom.yaml"));
     }
 
     // 2. 保存 default.custom.yaml (输入方案与中英按键)
     let mut default_yaml = String::new();
-    default_yaml.push_str("# WeaselTune 生成的全局输入行为补丁\n");
+    default_yaml.push_str("# RimeTune 生成的全局输入行为补丁\n");
     default_yaml.push_str("patch:\n");
     default_yaml.push_str(&format!("  \"menu/page_size\": {}\n", config.style.page_size));
     default_yaml.push_str("  schema_list:\n");
     for s in &config.schemas {
         if s.enabled && s.id != "radical_pinyin" && s.id != "wanxiang_reverse" {
             default_yaml.push_str(&format!("    - schema: {}\n", s.id));
+        }
+    }
+
+    // 在 Linux 环境下，app_options 结构化写入 default.custom.yaml
+    if is_linux && !config.app_options.is_empty() {
+        default_yaml.push_str("\n  # 特定应用专属行为 (app_options)\n");
+        for app in &config.app_options {
+            let name = app.app_name.trim();
+            if !name.is_empty() {
+                let escaped_name = yaml_escape_str(name);
+                if app.ascii_mode {
+                    default_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": true\n", escaped_name));
+                }
+                if app.inline_preedit {
+                    default_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": true\n", escaped_name));
+                }
+            }
         }
     }
 

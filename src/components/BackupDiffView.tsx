@@ -293,7 +293,8 @@ export const BackupDiffView: React.FC<BackupDiffViewProps> = ({
     }
   };
 
-  const backupsPath = userDir ? `${userDir}\\weaseltune_backups` : 'Rime 用户目录\\weaseltune_backups';
+  const sep = userDir?.includes('\\') ? '\\' : '/';
+  const backupsPath = userDir ? `${userDir}${sep}rimetune_backups` : 'Rime 用户目录/rimetune_backups';
 
   // 预先为每个 diff 计算行级差异，避免重复执行
   const parsedDiffs = useMemo(() => {
