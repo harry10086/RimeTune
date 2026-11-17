@@ -2640,8 +2640,8 @@ pub struct SwitchDetail {
     pub is_simplification_reversed: bool,
 }
 
-/// 解析指定方案 schema 中的 switches 列表，找到与目标开关名称匹配的真实数字索引及极性信息
-pub fn resolve_switch_detail_for_schema(user_dir: &str, schema_id: &str, switch_name: &str) -> Option<SwitchDetail> {
+/// 跨平台多路径探测并查找指定方案的 schema.yaml 源文件
+pub fn find_schema_file(user_dir: &str, schema_id: &str) -> Option<PathBuf> {
     let u_path = Path::new(user_dir);
     let mut candidate_paths = vec![
         u_path.join(format!("{}.schema.yaml", schema_id)),
@@ -2674,15 +2674,12 @@ pub fn resolve_switch_detail_for_schema(user_dir: &str, schema_id: &str, switch_
         candidate_paths.push(Path::new(scheme_subdir).join(format!("{}.schema.yaml", schema_id)));
     }
 
-    let mut schema_file = None;
-    for cp in candidate_paths {
-        if cp.exists() {
-            schema_file = Some(cp);
-            break;
-        }
-    }
+    candidate_paths.into_iter().find(|cp| cp.exists())
+}
 
-    if let Some(s_file) = schema_file {
+/// 解析指定方案 schema 中的 switches 列表，找到与目标开关名称匹配的真实数字索引及极性信息
+pub fn resolve_switch_detail_for_schema(user_dir: &str, schema_id: &str, switch_name: &str) -> Option<SwitchDetail> {
+    if let Some(s_file) = find_schema_file(user_dir, schema_id) {
         if let Ok(c) = fs::read_to_string(&s_file) {
             if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
                 if let Some(switches) = val.get("switches").and_then(|s| s.as_sequence()) {
@@ -2928,19 +2925,8 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
     };
 
     // 1. 读取基础 schema.yaml
-    let mut schema_file = u_path.join(format!("{}.schema.yaml", schema_id));
-    if !schema_file.exists() {
-        for scheme_subdir in &["scheme/rime-frost-master", "scheme/oh-my-rime-main", "scheme/rime-wanxiang-base"] {
-            let p = Path::new(scheme_subdir).join(format!("{}.schema.yaml", schema_id));
-            if p.exists() {
-                schema_file = p;
-                break;
-            }
-        }
-    }
-
-    if schema_file.exists() {
-        if let Ok(c) = fs::read_to_string(&schema_file) {
+    if let Some(s_file) = find_schema_file(user_dir, schema_id) {
+        if let Ok(c) = fs::read_to_string(&s_file) {
             if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
                 if let Some(b) = detect_any_switch(&val, &["traditionalization", "transcription", "s2t"]) {
                     toggles.traditionalization = b;
@@ -3110,10 +3096,88 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
         }
     }
 
+    // 3. 读取 user.yaml 中的运行时用户选项 (Rime 运行态真实持久化状态)
+    let user_yaml_path = u_path.join("user.yaml");
+    if user_yaml_path.exists() {
+        if let Ok(c) = fs::read_to_string(&user_yaml_path) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
+                if let Some(opts) = val.get("var").and_then(|v| v.get("option")) {
+                    if let Some(b) = opts.get("full_shape").and_then(|v| v.as_bool()) {
+                        toggles.full_shape = b;
+                    }
+                    if let Some(b) = opts.get("ascii_punct").and_then(|v| v.as_bool()) {
+                        toggles.ascii_punct = b;
+                    }
+                    if let Some(b) = opts.get("traditionalization").and_then(|v| v.as_bool()) {
+                        toggles.traditionalization = b;
+                    } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
+                        toggles.traditionalization = !b;
+                    }
+                }
+            }
+        }
+    }
+
     SchemaStateConfig {
         schema_id: schema_id.to_string(),
         fuzzy_pinyin: fuzzy,
         toggles,
+    }
+}
+
+/// 维护 user.yaml 中的 var/option 字段，确保 librime 运行时状态与用户设置一致
+pub fn update_user_yaml_options(user_dir: &str, toggles: &RimeIceToggles) {
+    let u_path = Path::new(user_dir);
+    let user_yaml_path = u_path.join("user.yaml");
+    let mut data: serde_yaml::Value = if user_yaml_path.exists() {
+        fs::read_to_string(&user_yaml_path)
+            .ok()
+            .and_then(|c| serde_yaml::from_str(&c).ok())
+            .unwrap_or_else(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
+    } else {
+        serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+    };
+
+    if !data.is_mapping() {
+        data = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+    }
+
+    let map = data.as_mapping_mut().unwrap();
+    let var_key = serde_yaml::Value::String("var".to_string());
+    if !map.contains_key(&var_key) || !map[&var_key].is_mapping() {
+        map.insert(var_key.clone(), serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    }
+
+    let var_map = map.get_mut(&var_key).unwrap().as_mapping_mut().unwrap();
+    let option_key = serde_yaml::Value::String("option".to_string());
+    if !var_map.contains_key(&option_key) || !var_map[&option_key].is_mapping() {
+        var_map.insert(option_key.clone(), serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    }
+
+    let opt_map = var_map.get_mut(&option_key).unwrap().as_mapping_mut().unwrap();
+    opt_map.insert(
+        serde_yaml::Value::String("full_shape".to_string()),
+        serde_yaml::Value::Bool(toggles.full_shape),
+    );
+    opt_map.insert(
+        serde_yaml::Value::String("ascii_punct".to_string()),
+        serde_yaml::Value::Bool(toggles.ascii_punct),
+    );
+    opt_map.insert(
+        serde_yaml::Value::String("traditionalization".to_string()),
+        serde_yaml::Value::Bool(toggles.traditionalization),
+    );
+    opt_map.insert(
+        serde_yaml::Value::String("simplification".to_string()),
+        serde_yaml::Value::Bool(!toggles.traditionalization),
+    );
+    opt_map.insert(
+        serde_yaml::Value::String("zh_simp".to_string()),
+        serde_yaml::Value::Bool(!toggles.traditionalization),
+    );
+
+    if let Ok(serialized) = serde_yaml::to_string(&data) {
+        let _ = fs::write(user_yaml_path, serialized);
     }
 }
 
@@ -3756,6 +3820,28 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
     }
     rime_ice_toggles.enable_typing_stats = lua_file.exists() && stats_patch_detected;
 
+    // 读取 user.yaml 中的运行时用户选项 (Rime 运行态真实持久化状态)
+    let user_yaml_path = u_path.join("user.yaml");
+    if user_yaml_path.exists() {
+        if let Ok(c) = fs::read_to_string(&user_yaml_path) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
+                if let Some(opts) = val.get("var").and_then(|v| v.get("option")) {
+                    if let Some(b) = opts.get("full_shape").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.full_shape = b;
+                    }
+                    if let Some(b) = opts.get("ascii_punct").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.ascii_punct = b;
+                    }
+                    if let Some(b) = opts.get("traditionalization").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.traditionalization = b;
+                    } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.traditionalization = !b;
+                    }
+                }
+            }
+        }
+    }
+
     let dict_files = scan_installed_dicts(user_dir);
     let custom_dicts = scan_custom_dicts(user_dir);
 
@@ -3777,6 +3863,9 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     if !u_path.exists() {
         fs::create_dir_all(u_path).map_err(|e| e.to_string())?;
     }
+
+    // 0. 同步维护 user.yaml 运行时状态，确保切换即刻真实生效
+    update_user_yaml_options(user_dir, &config.rime_ice_toggles);
 
     // 1. 保存 weasel.custom.yaml
     let mut weasel_yaml = String::new();
@@ -3967,24 +4056,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     default_yaml.push_str(&format!("    Control_R: {}\n", config.key_bindings.control_r));
     default_yaml.push_str(&format!("  \"ascii_composer/good_old_caps_lock\": {}\n", config.key_bindings.good_old_caps_lock));
 
-    if !config.key_bindings.switcher_hotkeys.is_empty() {
-        default_yaml.push_str("\n  # 方案选单切换快捷键 (switcher/hotkeys)\n");
-        default_yaml.push_str("  \"switcher/hotkeys\":\n");
-        for hk in &config.key_bindings.switcher_hotkeys {
-            default_yaml.push_str(&format!("    - \"{}\"\n", hk));
-        }
-    }
-
-    default_yaml.push_str("\n  # 全局基础状态重置补丁 (switches)\n");
-    default_yaml.push_str(&format!("  \"switches/@name/traditionalization/reset\": {}\n", if config.rime_ice_toggles.traditionalization { 1 } else { 0 }));
-    default_yaml.push_str(&format!("  \"switches/@name/full_shape/reset\": {}\n", if config.rime_ice_toggles.full_shape { 1 } else { 0 }));
-    default_yaml.push_str(&format!("  \"switches/@name/ascii_punct/reset\": {}\n", if config.rime_ice_toggles.ascii_punct { 1 } else { 0 }));
-
-    validate_yaml(&default_yaml, "default.custom.yaml")?;
-    fs::write(u_path.join("default.custom.yaml"), default_yaml)
-        .map_err(|e| format!("写入 default.custom.yaml 失败: {}", e))?;
-
-    // 3. 通用补丁片段准备：模糊音与翻页按键多选绑定
+    // 2. 通用补丁片段准备：模糊音与翻页按键多选绑定
     let mut fuzzy_rules = Vec::new();
     if config.fuzzy_pinyin.z_zh {
         fuzzy_rules.push("derive/^([zcs])h/$1/");
@@ -4069,6 +4141,23 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     } else {
         ""
     };
+
+    if !config.key_bindings.switcher_hotkeys.is_empty() {
+        default_yaml.push_str("\n  # 方案选单切换快捷键 (switcher/hotkeys)\n");
+        default_yaml.push_str("  \"switcher/hotkeys\":\n");
+        for hk in &config.key_bindings.switcher_hotkeys {
+            default_yaml.push_str(&format!("    - \"{}\"\n", hk));
+        }
+    }
+
+    // 全局翻页按键绑定注入 default.custom.yaml
+    if !page_keys_yaml_block.is_empty() {
+        default_yaml.push_str(&page_keys_yaml_block);
+    }
+
+    validate_yaml(&default_yaml, "default.custom.yaml")?;
+    fs::write(u_path.join("default.custom.yaml"), default_yaml)
+        .map_err(|e| format!("写入 default.custom.yaml 失败: {}", e))?;
 
     // 4. 针对各大拼音方案分别生成专属定制补丁（基于真实的 schema switch 索引生成并严格排重，杜绝 YAML 重复键）
     let append_switch_resets = |yaml: &mut String, resets: &std::collections::BTreeMap<usize, u64>| {
@@ -4508,32 +4597,38 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     ];
     for s in &config.schemas {
         if s.enabled && !handled_ids.contains(&s.id.as_str()) && !s.id.starts_with("wanxiang") {
-            let schema_file = u_path.join(format!("{}.schema.yaml", s.id));
-            if schema_file.exists() || Path::new(&s.file_path).exists() {
-                let mut other_yaml = String::new();
-                other_yaml.push_str(&format!("# WeaselTune 生成的方案定制补丁: {}\n", s.name));
-                other_yaml.push_str("patch:\n");
-                other_yaml.push_str(&format!("  \"menu/page_size\": {}\n", config.style.page_size));
+            let mut other_yaml = String::new();
+            other_yaml.push_str(&format!("# RimeTune 生成的方案定制补丁: {}\n", s.name));
+            other_yaml.push_str("patch:\n");
+            other_yaml.push_str(&format!("  \"menu/page_size\": {}\n", config.style.page_size));
+            other_yaml.push_str(&format!(
+                "  \"translator/spelling_hints\": {}\n",
+                if config.rime_ice_toggles.spelling_hints { 8 } else { 0 }
+            ));
 
-                let mut resets = std::collections::BTreeMap::new();
-                if let Some(i) = resolve_switch_index_for_schema(user_dir, &s.id, "traditionalization") {
-                    resets.insert(i, if config.rime_ice_toggles.traditionalization { 1 } else { 0 });
-                }
-                if let Some(i) = resolve_switch_index_for_schema(user_dir, &s.id, "full_shape") {
-                    resets.insert(i, if config.rime_ice_toggles.full_shape { 1 } else { 0 });
-                }
-                if let Some(i) = resolve_switch_index_for_schema(user_dir, &s.id, "ascii_punct") {
-                    resets.insert(i, if config.rime_ice_toggles.ascii_punct { 1 } else { 0 });
-                }
-                append_switch_resets(&mut other_yaml, &resets);
-
-                other_yaml.push_str(&fuzzy_yaml_block);
-                other_yaml.push_str(&page_keys_yaml_block);
-                other_yaml.push_str(stats_filter_block);
-
-                let _ = validate_yaml(&other_yaml, &format!("{}.custom.yaml", s.id));
-                let _ = fs::write(u_path.join(format!("{}.custom.yaml", s.id)), &other_yaml);
+            let mut resets = std::collections::BTreeMap::new();
+            if let Some(detail) = resolve_switch_detail_for_schema(user_dir, &s.id, "traditionalization") {
+                let val = if detail.is_simplification_reversed {
+                    if config.rime_ice_toggles.traditionalization { 0 } else { 1 }
+                } else {
+                    if config.rime_ice_toggles.traditionalization { 1 } else { 0 }
+                };
+                resets.insert(detail.index, val);
             }
+            if let Some(detail) = resolve_switch_detail_for_schema(user_dir, &s.id, "full_shape") {
+                resets.insert(detail.index, if config.rime_ice_toggles.full_shape { 1 } else { 0 });
+            }
+            if let Some(detail) = resolve_switch_detail_for_schema(user_dir, &s.id, "ascii_punct") {
+                resets.insert(detail.index, if config.rime_ice_toggles.ascii_punct { 1 } else { 0 });
+            }
+            append_switch_resets(&mut other_yaml, &resets);
+
+            other_yaml.push_str(&fuzzy_yaml_block);
+            other_yaml.push_str(&page_keys_yaml_block);
+            other_yaml.push_str(stats_filter_block);
+
+            let _ = validate_yaml(&other_yaml, &format!("{}.custom.yaml", s.id));
+            let _ = fs::write(u_path.join(format!("{}.custom.yaml", s.id)), &other_yaml);
         }
     }
 

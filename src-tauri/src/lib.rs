@@ -1007,4 +1007,77 @@ switches:
         let _ = std::fs::remove_dir_all(&temp_dir);
         let _ = std::fs::remove_dir_all(&frost_dir);
     }
+
+    #[test]
+    fn test_schema_switches_spelling_hints_and_key_bindings() {
+        let temp_dir = std::env::temp_dir().join("rimetune_test_switches_keys");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let u_str = temp_dir.to_str().unwrap();
+
+        let luna_content = r#"
+schema:
+  schema_id: luna_pinyin_simp
+  name: 朙月拼音·简化字
+switches:
+  - name: ascii_mode
+    reset: 0
+    states: ["中文", "西文"]
+  - name: full_shape
+    states: ["半角", "全角"]
+  - name: zh_simp
+    reset: 1
+    states: ["漢字", "汉字"]
+  - name: ascii_punct
+    states: ["，。", "，．"]
+"#;
+        std::fs::write(temp_dir.join("luna_pinyin_simp.schema.yaml"), luna_content).unwrap();
+
+        let mut config = patcher::load_unified_config(u_str);
+        config.schemas = vec![
+            patcher::SchemaItem {
+                id: "luna_pinyin_simp".to_string(),
+                name: "朙月拼音·简化字".to_string(),
+                enabled: true,
+                description: "通用全拼方案".to_string(),
+                file_path: temp_dir.join("luna_pinyin_simp.schema.yaml").to_string_lossy().to_string(),
+            }
+        ];
+        config.rime_ice_toggles.spelling_hints = true;
+        config.rime_ice_toggles.traditionalization = false; // 用户要简体，zh_simp 应为 1
+        config.rime_ice_toggles.full_shape = true;
+        config.rime_ice_toggles.ascii_punct = true;
+        config.key_bindings.page_up_down_keys = vec!["comma_period".to_string(), "minus_equal".to_string()];
+
+        let res = patcher::save_unified_config(u_str, config);
+        assert!(res.is_ok(), "save_unified_config failed: {:?}", res);
+
+        // 1. 验证 default.custom.yaml 含有 page_up_down_keys 且不含 switches/@name
+        let def_custom = std::fs::read_to_string(temp_dir.join("default.custom.yaml")).unwrap();
+        assert!(!def_custom.contains("@name"), "default.custom.yaml must not contain invalid @name switches");
+        assert!(def_custom.contains("Page_Up"), "default.custom.yaml must contain global Page_Up bindings");
+        assert!(def_custom.contains("comma"), "default.custom.yaml must contain comma paging key");
+
+        // 2. 验证 luna_pinyin_simp.custom.yaml
+        let luna_custom = std::fs::read_to_string(temp_dir.join("luna_pinyin_simp.custom.yaml")).unwrap();
+        assert!(luna_custom.contains(r#""translator/spelling_hints": 8"#), "luna_custom must contain spelling_hints: 8");
+        assert!(luna_custom.contains(r#""switches/@1/reset": 1"#), "full_shape reset should be 1");
+        assert!(luna_custom.contains(r#""switches/@2/reset": 1"#), "zh_simp reset should be 1 for simplified Chinese");
+        assert!(luna_custom.contains(r#""switches/@3/reset": 1"#), "ascii_punct reset should be 1");
+
+        // 3. 验证 user.yaml 状态写入与读取
+        let user_yaml = std::fs::read_to_string(temp_dir.join("user.yaml")).unwrap();
+        assert!(user_yaml.contains("full_shape: true"));
+        assert!(user_yaml.contains("ascii_punct: true"));
+        assert!(user_yaml.contains("zh_simp: true"));
+        assert!(user_yaml.contains("traditionalization: false"));
+
+        let reloaded = patcher::load_unified_config(u_str);
+        assert!(reloaded.rime_ice_toggles.spelling_hints);
+        assert!(reloaded.rime_ice_toggles.full_shape);
+        assert!(reloaded.rime_ice_toggles.ascii_punct);
+        assert!(!reloaded.rime_ice_toggles.traditionalization);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
