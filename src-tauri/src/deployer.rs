@@ -101,12 +101,30 @@ pub fn run_weasel_command(
             }
         }
 
-        // 3. Fcitx5 环境：通过 D-Bus 接口通知 Fcitx5-Rime 重新部署，并重载配置
-        let is_fcitx5 = user_dir.contains("fcitx5")
-            || std::path::Path::new("/usr/bin/fcitx5").exists()
-            || std::path::Path::new("/usr/bin/fcitx5-remote").exists();
+        // 3. 判断当前激活的目标环境：优先根据用户配置目录，次之根据当前正在运行的守护进程
+        let is_user_dir_ibus = user_dir.contains("ibus");
+        let is_user_dir_fcitx5 = user_dir.contains("fcitx5");
 
-        if is_fcitx5 {
+        let (target_is_ibus, target_is_fcitx5) = if is_user_dir_ibus {
+            (true, false)
+        } else if is_user_dir_fcitx5 {
+            (false, true)
+        } else {
+            let p_fcitx5 = Command::new("pgrep").arg("-x").arg("fcitx5").output().map(|o| o.status.success()).unwrap_or(false);
+            let p_ibus = Command::new("pgrep").arg("-x").arg("ibus-daemon").output().map(|o| o.status.success()).unwrap_or(false);
+            if p_fcitx5 {
+                (false, true)
+            } else if p_ibus {
+                (true, false)
+            } else if std::path::Path::new("/usr/bin/fcitx5").exists() || std::path::Path::new("/usr/bin/fcitx5-remote").exists() {
+                (false, true)
+            } else {
+                (true, false)
+            }
+        };
+
+        // Fcitx5 环境：通过 D-Bus 接口通知 Fcitx5-Rime 重新部署，并重载配置
+        if target_is_fcitx5 {
             // 通过 busctl 调用 Fcitx5 接口通知 Rime 重新部署
             let busctl_status = Command::new("busctl")
                 .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "SetConfig", "sv", "fcitx://config/addon/rime/deploy", "s", ""])
@@ -138,14 +156,13 @@ pub fn run_weasel_command(
             };
         }
 
-        // 4. IBus 环境
-        let is_ibus = user_dir.contains("ibus") || std::path::Path::new("/usr/bin/ibus").exists();
-        if is_ibus {
+        // IBus 环境
+        if target_is_ibus {
             let _ = Command::new("ibus").arg("restart").status();
             return DeployResult {
                 success: true,
-                message: "已更新配置时间戳并重启 IBus-Rime 服务生效".to_string(),
-                deployer_used: "ibus restart".to_string(),
+                message: format!("已成功触发 IBus-Rime 部署与服务重启 ({})", if rime_deployed { "rime_deployer + ibus restart" } else { "ibus restart" }),
+                deployer_used: if rime_deployed { "rime_deployer + ibus restart".to_string() } else { "ibus restart".to_string() },
             };
         }
 

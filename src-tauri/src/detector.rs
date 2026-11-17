@@ -237,26 +237,45 @@ pub fn inspect_environment() -> EnvironmentStatus {
 
     #[cfg(target_os = "linux")]
     let (host_id, host_name, host_display_name, custom_filename) = {
-        let is_fcitx5 = rime_user_dir.contains("fcitx5")
-            || deployer_path.contains("fcitx5")
-            || Path::new("/usr/bin/fcitx5").exists()
-            || Path::new("/usr/bin/fcitx5-remote").exists();
-        let is_ibus = rime_user_dir.contains("ibus")
-            || deployer_path.contains("ibus")
-            || Path::new("/usr/bin/ibus").exists();
+        let is_user_dir_ibus = rime_user_dir.contains("ibus");
+        let is_user_dir_fcitx5 = rime_user_dir.contains("fcitx5");
 
-        if is_fcitx5 {
-            (
-                "fcitx5".to_string(),
-                "Fcitx5-Rime".to_string(),
-                "Fcitx5-Rime".to_string(),
-                "default.custom.yaml".to_string(),
-            )
-        } else if is_ibus {
+        let (is_ibus, is_fcitx5) = if is_user_dir_ibus {
+            (true, false)
+        } else if is_user_dir_fcitx5 {
+            (false, true)
+        } else {
+            // 用户目录无显式标识时，优先检测当前正在运行的输入法守护进程
+            let is_fcitx5_running = Path::new("/usr/bin/fcitx5-remote").exists()
+                && std::process::Command::new("pgrep").arg("-x").arg("fcitx5").output().map(|o| o.status.success()).unwrap_or(false);
+            let is_ibus_running = Path::new("/usr/bin/ibus").exists()
+                && std::process::Command::new("pgrep").arg("-x").arg("ibus-daemon").output().map(|o| o.status.success()).unwrap_or(false);
+
+            if is_fcitx5_running {
+                (false, true)
+            } else if is_ibus_running {
+                (true, false)
+            } else if Path::new("/usr/bin/fcitx5").exists() || Path::new("/usr/bin/fcitx5-remote").exists() {
+                (false, true)
+            } else if Path::new("/usr/bin/ibus").exists() {
+                (true, false)
+            } else {
+                (false, false)
+            }
+        };
+
+        if is_ibus {
             (
                 "ibus".to_string(),
                 "IBus-Rime".to_string(),
                 "IBus-Rime".to_string(),
+                "default.custom.yaml".to_string(),
+            )
+        } else if is_fcitx5 {
+            (
+                "fcitx5".to_string(),
+                "Fcitx5-Rime".to_string(),
+                "Fcitx5-Rime".to_string(),
                 "default.custom.yaml".to_string(),
             )
         } else {
