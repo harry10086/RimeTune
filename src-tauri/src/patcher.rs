@@ -3334,6 +3334,70 @@ pub fn update_user_yaml_options(user_dir: &str, toggles: &RimeIceToggles, primar
     }
 }
 
+fn detect_page_keys_from_patch(patch: &serde_yaml::Value) -> Option<Vec<String>> {
+    let mut found_bindings = false;
+    let mut has_cp = false;
+    let mut has_me = false;
+    let mut has_br = false;
+
+    let mut inspect_seq = |seq: &serde_yaml::Sequence| {
+        for item in seq {
+            if let Some(m) = item.as_mapping() {
+                let accept = m.get(&serde_yaml::Value::String("accept".to_string()))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
+                let send = m.get(&serde_yaml::Value::String("send".to_string()))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
+                if accept == "comma" || accept == "period" || accept == "minus" || accept == "equal" || accept == "bracketleft" || accept == "bracketright" {
+                    found_bindings = true;
+                    if send == "Page_Up" || send == "Page_Down" {
+                        if accept == "comma" || accept == "period" {
+                            has_cp = true;
+                        } else if accept == "minus" || accept == "equal" {
+                            has_me = true;
+                        } else if accept == "bracketleft" || accept == "bracketright" {
+                            has_br = true;
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    if let Some(map) = patch.as_mapping() {
+        for (k, v) in map {
+            let k_str = k.as_str().unwrap_or("");
+            if k_str == "key_binder/bindings/+" || k_str == "key_binder/bindings" {
+                if let Some(seq) = v.as_sequence() {
+                    inspect_seq(seq);
+                }
+            } else if k_str == "key_binder" {
+                if let Some(km) = v.as_mapping() {
+                    for (sub_k, sub_v) in km {
+                        let sub_str = sub_k.as_str().unwrap_or("");
+                        if sub_str == "bindings" || sub_str == "bindings/+" {
+                            if let Some(seq) = sub_v.as_sequence() {
+                                inspect_seq(seq);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if found_bindings {
+        let mut res = Vec::new();
+        if has_cp { res.push("comma_period".to_string()); }
+        if has_me { res.push("minus_equal".to_string()); }
+        if has_br { res.push("bracket".to_string()); }
+        Some(res)
+    } else {
+        None
+    }
+}
+
 pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
     let mut preset_schemes = load_preset_color_schemes(user_dir);
     let u_path = Path::new(user_dir);
@@ -3655,6 +3719,10 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                         }
                     }
 
+                    if let Some(keys) = detect_page_keys_from_patch(patch) {
+                        key_bindings.page_up_down_keys = keys;
+                    }
+
                     // 支持从 default.custom.yaml 中读取 app_options (Linux / 全局配置规范)
                     if let Some(patch_map) = patch.as_mapping() {
                         let mut default_app_map: std::collections::BTreeMap<String, (bool, bool)> = std::collections::BTreeMap::new();
@@ -3845,7 +3913,6 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
     }
 
     // 再读取用户针对方案的 custom.yaml 补丁（拥有最高优先级覆盖，保证用户设定绝对生效）
-    let mut detected_page_keys = Vec::new();
     for sid in &candidate_schema_ids {
         let custom_path = u_path.join(format!("{}.custom.yaml", sid));
         if custom_path.exists() {
@@ -3958,19 +4025,13 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                         }
 
                         // 翻页按键多选探测
-                        let key_text = serde_yaml::to_string(patch).unwrap_or_default();
-                        if key_text.contains("comma") && key_text.contains("period") && !detected_page_keys.contains(&"comma_period".to_string()) {
-                            detected_page_keys.push("comma_period".to_string());
-                        }
-                        if key_text.contains("minus") && key_text.contains("equal") && !detected_page_keys.contains(&"minus_equal".to_string()) {
-                            detected_page_keys.push("minus_equal".to_string());
-                        }
-                        if (key_text.contains("bracketleft") || key_text.contains("bracketright")) && !detected_page_keys.contains(&"bracket".to_string()) {
-                            detected_page_keys.push("bracket".to_string());
+                        if let Some(keys) = detect_page_keys_from_patch(patch) {
+                            key_bindings.page_up_down_keys = keys;
                         }
 
                         // 词库探测
-                        if key_text.contains("41448") {
+                        let patch_text = serde_yaml::to_string(patch).unwrap_or_default();
+                        if patch_text.contains("41448") {
                             rime_ice_toggles.dict_large_char = true;
                         }
                     }
@@ -4019,9 +4080,6 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
         }
     }
 
-    if !detected_page_keys.is_empty() {
-        key_bindings.page_up_down_keys = detected_page_keys;
-    }
 
     // 若未显式配置语言模型名称但目录下检测到了 .gram 模型，预填默认模型
     if rime_ice_toggles.grammar_model.is_empty() {
@@ -4326,8 +4384,16 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     }
 
+    let has_bracket = config.key_bindings.page_up_down_keys.contains(&"bracket".to_string());
     let mut page_keys_yaml_block = String::new();
     page_keys_yaml_block.push_str("\n  # 全局翻页按键控制\n");
+    if has_bracket {
+        page_keys_yaml_block.push_str("  \"key_binder/select_first_character\": \"\"\n");
+        page_keys_yaml_block.push_str("  \"key_binder/select_last_character\": \"\"\n");
+    } else {
+        page_keys_yaml_block.push_str("  \"key_binder/select_first_character\": \"bracketleft\"\n");
+        page_keys_yaml_block.push_str("  \"key_binder/select_last_character\": \"bracketright\"\n");
+    }
     page_keys_yaml_block.push_str("  \"key_binder/bindings/+\":\n");
     if config.key_bindings.page_up_down_keys.contains(&"comma_period".to_string()) {
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: comma, send: Page_Up }\n");
@@ -4343,7 +4409,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: minus, send: minus }\n");
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: equal, send: equal }\n");
     }
-    if config.key_bindings.page_up_down_keys.contains(&"bracket".to_string()) {
+    if has_bracket {
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketleft, send: Page_Up }\n");
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketright, send: Page_Down }\n");
     } else {
@@ -4352,38 +4418,40 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     }
 
     let build_schema_bindings_block = |extra_bindings: &[(&str, &str, &str)]| -> String {
-        let mut lines = Vec::new();
-        if config.key_bindings.page_up_down_keys.contains(&"comma_period".to_string()) {
-            lines.push("    - { when: has_menu, accept: comma, send: Page_Up }".to_string());
-            lines.push("    - { when: has_menu, accept: period, send: Page_Down }".to_string());
-        } else {
-            lines.push("    - { when: has_menu, accept: comma, send: comma }".to_string());
-            lines.push("    - { when: has_menu, accept: period, send: period }".to_string());
-        }
-        if config.key_bindings.page_up_down_keys.contains(&"minus_equal".to_string()) {
-            lines.push("    - { when: has_menu, accept: minus, send: Page_Up }".to_string());
-            lines.push("    - { when: has_menu, accept: equal, send: Page_Down }".to_string());
-        } else {
-            lines.push("    - { when: has_menu, accept: minus, send: minus }".to_string());
-            lines.push("    - { when: has_menu, accept: equal, send: equal }".to_string());
-        }
-        if config.key_bindings.page_up_down_keys.contains(&"bracket".to_string()) {
-            lines.push("    - { when: has_menu, accept: bracketleft, send: Page_Up }".to_string());
-            lines.push("    - { when: has_menu, accept: bracketright, send: Page_Down }".to_string());
-        } else {
-            lines.push("    - { when: has_menu, accept: bracketleft, send: bracketleft }".to_string());
-            lines.push("    - { when: has_menu, accept: bracketright, send: bracketright }".to_string());
-        }
-        for (when, accept, toggle) in extra_bindings {
-            lines.push(format!("    - {{ when: {}, accept: \"{}\", toggle: {} }}", when, accept, toggle));
-        }
-
         let mut res = String::new();
         res.push_str("\n  # 按键绑定 (翻页与功能快捷开关)\n");
+        let has_bracket = config.key_bindings.page_up_down_keys.contains(&"bracket".to_string());
+        if has_bracket {
+            res.push_str("  \"key_binder/select_first_character\": \"\"\n");
+            res.push_str("  \"key_binder/select_last_character\": \"\"\n");
+        } else {
+            res.push_str("  \"key_binder/select_first_character\": \"bracketleft\"\n");
+            res.push_str("  \"key_binder/select_last_character\": \"bracketright\"\n");
+        }
         res.push_str("  \"key_binder/bindings/+\":\n");
-        for l in lines {
-            res.push_str(&l);
-            res.push('\n');
+        if config.key_bindings.page_up_down_keys.contains(&"comma_period".to_string()) {
+            res.push_str("    - { when: has_menu, accept: comma, send: Page_Up }\n");
+            res.push_str("    - { when: has_menu, accept: period, send: Page_Down }\n");
+        } else {
+            res.push_str("    - { when: has_menu, accept: comma, send: comma }\n");
+            res.push_str("    - { when: has_menu, accept: period, send: period }\n");
+        }
+        if config.key_bindings.page_up_down_keys.contains(&"minus_equal".to_string()) {
+            res.push_str("    - { when: has_menu, accept: minus, send: Page_Up }\n");
+            res.push_str("    - { when: has_menu, accept: equal, send: Page_Down }\n");
+        } else {
+            res.push_str("    - { when: has_menu, accept: minus, send: minus }\n");
+            res.push_str("    - { when: has_menu, accept: equal, send: equal }\n");
+        }
+        if has_bracket {
+            res.push_str("    - { when: has_menu, accept: bracketleft, send: Page_Up }\n");
+            res.push_str("    - { when: has_menu, accept: bracketright, send: Page_Down }\n");
+        } else {
+            res.push_str("    - { when: has_menu, accept: bracketleft, send: bracketleft }\n");
+            res.push_str("    - { when: has_menu, accept: bracketright, send: bracketright }\n");
+        }
+        for (when, accept, toggle) in extra_bindings {
+            res.push_str(&format!("    - {{ when: {}, accept: \"{}\", toggle: {} }}\n", when, accept, toggle));
         }
         res
     };
