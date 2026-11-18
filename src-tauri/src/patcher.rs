@@ -2765,9 +2765,10 @@ pub fn resolve_switch_detail_for_schema(user_dir: &str, schema_id: &str, switch_
         "rime_ice" => match switch_name {
             "ascii_punct" => Some(1),
             "traditionalization" => Some(2),
-            "full_shape" => Some(3),
-            "search_single_char" => Some(4),
-            "emoji" => Some(5),
+            "emoji" => Some(3),
+            "full_shape" => Some(4),
+            "search_single_char" => Some(5),
+            "dict_comment" => Some(6),
             _ => None,
         },
         "rime_mint" | "rime_mint_simp" | "rime_mint_flypy" | "rime_mint_mspy" | "mint_pinyin" | "mint_pinyin_simp" => match switch_name {
@@ -3155,6 +3156,19 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
             }
         }
     }
+
+    // 探测打字统计 (input_stats.lua) 是否已启用
+    let lua_file = u_path.join("lua").join("input_stats.lua");
+    let mut stats_patch_detected = false;
+    let custom_file = u_path.join(format!("{}.custom.yaml", schema_id));
+    if custom_file.exists() {
+        if let Ok(c) = fs::read_to_string(&custom_file) {
+            if c.contains("lua_filter@*input_stats") {
+                stats_patch_detected = true;
+            }
+        }
+    }
+    toggles.enable_typing_stats = lua_file.exists() && (stats_patch_detected || lua_file.is_file());
 
     SchemaStateConfig {
         schema_id: schema_id.to_string(),
@@ -4402,6 +4416,29 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             rime_ice_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
         }
 
+        // 英文混输补全 (melt_eng) 与 部件拆字反查 (radical_pinyin) 动态禁用/启用补丁
+        if !config.rime_ice_toggles.enable_melt_eng {
+            rime_ice_yaml.push_str("\n  # 禁用英文混输补全 (melt_eng)\n");
+            rime_ice_yaml.push_str("  \"engine/translators\":\n");
+            rime_ice_yaml.push_str("    - punct_translator\n");
+            rime_ice_yaml.push_str("    - script_translator\n");
+            rime_ice_yaml.push_str("    - lua_translator@*date_translator\n");
+            rime_ice_yaml.push_str("    - lua_translator@*lunar\n");
+            rime_ice_yaml.push_str("    - lua_translator@*uuid\n");
+            rime_ice_yaml.push_str("    - table_translator@custom_phrase\n");
+            rime_ice_yaml.push_str("    - table_translator@cn_en\n");
+            rime_ice_yaml.push_str("    - table_translator@radical_lookup\n");
+            rime_ice_yaml.push_str("    - lua_translator@*unicode\n");
+            rime_ice_yaml.push_str("    - lua_translator@*number_translator\n");
+            rime_ice_yaml.push_str("    - lua_translator@*calc_translator\n");
+            rime_ice_yaml.push_str("    - lua_translator@*markdown_translator@markdown\n");
+            rime_ice_yaml.push_str("    - lua_translator@*force_gc\n");
+        }
+        if !config.rime_ice_toggles.enable_radical_pinyin {
+            rime_ice_yaml.push_str("\n  # 禁用部件拆字反查 (radical_pinyin)\n");
+            rime_ice_yaml.push_str("  \"recognizer/patterns/radical_lookup\": \"\"\n");
+        }
+
         let _ = validate_yaml(&rime_ice_yaml, "rime_ice.custom.yaml");
         let _ = fs::write(u_path.join("rime_ice.custom.yaml"), &rime_ice_yaml);
     }
@@ -4712,7 +4749,21 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             if let Some(detail) = resolve_switch_detail_for_schema(user_dir, &s.id, "ascii_punct") {
                 resets.insert(detail.index, if config.rime_ice_toggles.ascii_punct { 1 } else { 0 });
             }
+            if let Some(detail) = resolve_switch_detail_for_schema(user_dir, &s.id, "emoji") {
+                resets.insert(detail.index, if config.rime_ice_toggles.emoji { 1 } else { 0 });
+            }
+            if let Some(detail) = resolve_switch_detail_for_schema(user_dir, &s.id, "search_single_char") {
+                resets.insert(detail.index, if config.rime_ice_toggles.search_single_char { 1 } else { 0 });
+            }
+            if let Some(detail) = resolve_switch_detail_for_schema(user_dir, &s.id, "dict_comment") {
+                let dc_val = if config.rime_ice_toggles.spelling_hints { 0 } else if config.rime_ice_toggles.dict_comment_chinese_to_english || config.rime_ice_toggles.dict_comment_english_to_chinese { 1 } else { 0 };
+                resets.insert(detail.index, dc_val);
+            }
             append_switch_resets(&mut other_yaml, &resets);
+
+            if !config.rime_ice_toggles.enable_radical_pinyin {
+                other_yaml.push_str("  \"recognizer/patterns/radical_lookup\": \"\"\n");
+            }
 
             other_yaml.push_str(&fuzzy_yaml_block);
             other_yaml.push_str(&page_keys_yaml_block);
