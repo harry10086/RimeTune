@@ -236,7 +236,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               </div>
 
-              {(!env?.is_lua_available || !env?.is_octagram_available || !env?.is_opencc_available) && (
+              {(!env?.is_lua_available || !env?.is_octagram_available || !env?.is_opencc_available) ? (
                 <div
                   style={{
                     marginTop: '6px',
@@ -301,6 +301,78 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <div
                       style={{
                         fontSize: '12px',
+                        color: pluginInstallMsg.success ? '#34d399' : '#f87171',
+                      }}
+                    >
+                      {pluginInstallMsg.text}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    marginTop: '6px',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(52, 211, 153, 0.08)',
+                    border: '1px solid rgba(52, 211, 153, 0.2)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: '#34d399', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Check size={14} /> Linux Rime 插件及周边依赖已全部就绪（支持词典释义、打字统计与语言模型）。
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      onClick={handleInstallPlugins}
+                      disabled={installingPlugins}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        backgroundColor: 'var(--bg-elevated)',
+                        color: 'var(--text-main)',
+                        border: '1px solid var(--border)',
+                        cursor: installingPlugins ? 'not-allowed' : 'pointer',
+                        opacity: installingPlugins ? 0.7 : 1,
+                      }}
+                    >
+                      <Download size={13} className={installingPlugins ? 'spin' : ''} />
+                      {installingPlugins ? '正在重新检查...' : '重新检测 / 修复组件'}
+                    </button>
+                    {env?.linux_install_command && (
+                      <button
+                        onClick={handleCopyCmd}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          backgroundColor: 'var(--bg-elevated)',
+                          color: 'var(--text-dim)',
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                        }}
+                        title={env.linux_install_command}
+                      >
+                        {copiedCmd ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
+                        {copiedCmd ? '已复制命令' : '复制安装命令'}
+                      </button>
+                    )}
+                  </div>
+                  {pluginInstallMsg && (
+                    <div
+                      style={{
+                        fontSize: '11px',
                         color: pluginInstallMsg.success ? '#34d399' : '#f87171',
                       }}
                     >

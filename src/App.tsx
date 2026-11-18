@@ -339,10 +339,16 @@ export function App() {
       setLastDeployResult(res);
       showToast(res.message, res.success ? 'success' : 'error');
 
-      // 刷新环境状态（确保当前主方案、补丁等即时同步）
+      // 刷新环境状态与全量配置（确保当前主方案、补丁及各特性开关即时同步）
       try {
-        const refreshedEnv = await invoke<EnvironmentStatus>('get_environment_status');
+        const [refreshedEnv, refreshedConfig] = await Promise.all([
+          invoke<EnvironmentStatus>('get_environment_status'),
+          invoke<UnifiedFullConfig>('get_full_config', { userDir: env.rime_user_dir }),
+        ]);
         setEnv(refreshedEnv);
+        if (refreshedConfig) {
+          setConfig(refreshedConfig);
+        }
       } catch (e) {
         console.warn('Refresh environment status failed:', e);
       }

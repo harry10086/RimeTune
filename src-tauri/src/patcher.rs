@@ -2980,6 +2980,7 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
                 if let Some(b) = detect_switch_reset(&val, "super_tips") { toggles.super_tips = b; }
                 if let Some(b) = detect_switch_reset(&val, "charset_filter") { toggles.charset_filter = b; }
                 if let Some(b) = detect_switch_reset(&val, "abbrev") { toggles.abbrev = b; }
+                if let Some(b) = detect_switch_reset(&val, "dict_comment") { toggles.dict_comment = b; }
 
                 // 探测自带的拼音运算
                 if let Some(algebra) = val.get("speller").and_then(|s| s.get("algebra")) {
@@ -2995,11 +2996,51 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
                     if text.contains("derive/uan$/uang/") { fuzzy.uan_uang = true; }
                     if text.contains("derive/ong$/on/") || text.contains("derive/uen$/un/") { fuzzy.common_typos = true; }
                 }
+
+                // 探测自带的 translators
+                if let Some(translators) = val.get("engine").and_then(|e| e.get("translators")) {
+                    let trans_text = serde_yaml::to_string(translators).unwrap_or_default();
+                    toggles.enable_melt_eng = trans_text.contains("melt_eng");
+                }
             }
         }
     }
 
-    // 2. 读取方案特定的 custom.yaml 补丁（高优先级覆盖）
+    // 2. 读取 user.yaml 中的运行时用户选项作为备用初值
+    let user_yaml_path = u_path.join("user.yaml");
+    if user_yaml_path.exists() {
+        if let Ok(c) = fs::read_to_string(&user_yaml_path) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
+                if let Some(opts) = val.get("var").and_then(|v| v.get("option")) {
+                    if let Some(b) = opts.get("full_shape").and_then(|v| v.as_bool()) {
+                        toggles.full_shape = b;
+                    }
+                    if let Some(b) = opts.get("ascii_punct").and_then(|v| v.as_bool()) {
+                        toggles.ascii_punct = b;
+                    }
+                    if let Some(b) = opts.get("traditionalization").and_then(|v| v.as_bool()) {
+                        toggles.traditionalization = b;
+                    } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
+                        toggles.traditionalization = !b;
+                    }
+                    if let Some(b) = opts.get("emoji").and_then(|v| v.as_bool()) {
+                        toggles.emoji = b;
+                    }
+                    if let Some(b) = opts.get("search_single_char").and_then(|v| v.as_bool()) {
+                        toggles.search_single_char = b;
+                    }
+                    if let Some(b) = opts.get("dict_comment").and_then(|v| v.as_bool()) {
+                        toggles.dict_comment = b;
+                    }
+                    if let Some(b) = opts.get("chinese_english").and_then(|v| v.as_bool()) {
+                        toggles.chinese_english = b;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 读取方案特定的 custom.yaml 补丁（高优先级覆盖，保证用户显式保存的补丁绝对生效）
     let custom_file = u_path.join(format!("{}.custom.yaml", schema_id));
     if custom_file.exists() {
         if let Ok(c) = fs::read_to_string(&custom_file) {
@@ -3032,6 +3073,9 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
                 if let Some(b) = detect_schema_switch_state(&val, user_dir, schema_id, &["tone_hint"]) {
                     toggles.spelling_hints = b;
                 }
+                if let Some(b) = detect_schema_switch_state(&val, user_dir, schema_id, &["dict_comment"]) {
+                    toggles.dict_comment = b;
+                }
 
                 if let Some(patch) = val.get("patch") {
                     if let Some(dc) = patch.get("dict_comment_filter") {
@@ -3046,6 +3090,21 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
                         }
                         if let Some(u) = dc.get("max_length").and_then(|v| v.as_u64()) {
                             toggles.dict_comment_max_length = u as u32;
+                        }
+                    }
+
+                    // 探测英文混输补全 (melt_eng)
+                    if let Some(translators) = patch.get("engine/translators") {
+                        let text = serde_yaml::to_string(translators).unwrap_or_default();
+                        toggles.enable_melt_eng = text.contains("melt_eng");
+                    }
+
+                    // 探测部件拆字反查 (radical_pinyin)
+                    if let Some(rad) = patch.get("recognizer/patterns/radical_lookup") {
+                        if let Some(s) = rad.as_str() {
+                            toggles.enable_radical_pinyin = !s.trim().is_empty();
+                        } else if rad.is_null() {
+                            toggles.enable_radical_pinyin = false;
                         }
                     }
 
@@ -3069,14 +3128,18 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
                     }
 
                     // Octagram 语言模型探测 (方案特定 custom.yaml)
-                    if let Some(lang) = patch.get("grammar/language").and_then(|v| v.as_str())
-                        .or_else(|| patch.get("grammar").and_then(|g| g.get("language")).and_then(|v| v.as_str()))
-                    {
-                        let trimmed = lang.trim();
-                        if !trimmed.is_empty() && trimmed != "~" && trimmed != "null" {
-                            toggles.enable_grammar = true;
-                            toggles.grammar_model = trimmed.to_string();
-                        } else {
+                    let lang_val = patch.get("grammar/language")
+                        .or_else(|| patch.get("grammar").and_then(|g| g.get("language")));
+                    if let Some(v) = lang_val {
+                        if let Some(lang) = v.as_str() {
+                            let trimmed = lang.trim();
+                            if !trimmed.is_empty() && trimmed != "~" && trimmed != "null" {
+                                toggles.enable_grammar = true;
+                                toggles.grammar_model = trimmed.to_string();
+                            } else {
+                                toggles.enable_grammar = false;
+                            }
+                        } else if v.is_null() {
                             toggles.enable_grammar = false;
                         }
                     }
@@ -3089,6 +3152,29 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
                         .or_else(|| patch.get("grammar").and_then(|g| g.get("collocation_min_length")).and_then(|v| v.as_u64()))
                     {
                         toggles.grammar_collocation_min_length = min_l as u32;
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. 读取词典扩展清单中的子表勾选状态 (如 rime_ice.extended.dict.yaml)
+    let ext_dict_files = [
+        u_path.join(format!("{}.extended.dict.yaml", schema_id)),
+        u_path.join("rime_ice.extended.dict.yaml"),
+    ];
+    for ext_path in &ext_dict_files {
+        if ext_path.exists() {
+            if let Ok(c) = fs::read_to_string(ext_path) {
+                if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
+                    if let Some(tables) = val.get("import_tables").and_then(|t| t.as_sequence()) {
+                        let list: Vec<String> = tables.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
+                        toggles.dict_large_char = list.iter().any(|t| t.contains("41448"));
+                        toggles.dict_base = list.iter().any(|t| t.ends_with("base"));
+                        toggles.dict_ext = list.iter().any(|t| t.ends_with("ext"));
+                        toggles.dict_tencent = list.iter().any(|t| t.contains("tencent"));
+                        toggles.dict_others = list.iter().any(|t| t.ends_with("others"));
+                        break;
                     }
                 }
             }
@@ -3126,38 +3212,7 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
         }
     }
 
-    // 3. 读取 user.yaml 中的运行时用户选项 (Rime 运行态真实持久化状态)
-    let user_yaml_path = u_path.join("user.yaml");
-    if user_yaml_path.exists() {
-        if let Ok(c) = fs::read_to_string(&user_yaml_path) {
-            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
-                if let Some(opts) = val.get("var").and_then(|v| v.get("option")) {
-                    if let Some(b) = opts.get("full_shape").and_then(|v| v.as_bool()) {
-                        toggles.full_shape = b;
-                    }
-                    if let Some(b) = opts.get("ascii_punct").and_then(|v| v.as_bool()) {
-                        toggles.ascii_punct = b;
-                    }
-                    if let Some(b) = opts.get("traditionalization").and_then(|v| v.as_bool()) {
-                        toggles.traditionalization = b;
-                    } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
-                        toggles.traditionalization = !b;
-                    }
-                    if let Some(b) = opts.get("emoji").and_then(|v| v.as_bool()) {
-                        toggles.emoji = b;
-                    }
-                    if let Some(b) = opts.get("search_single_char").and_then(|v| v.as_bool()) {
-                        toggles.search_single_char = b;
-                    }
-                    if let Some(b) = opts.get("dict_comment").and_then(|v| v.as_bool()) {
-                        toggles.dict_comment = b;
-                    }
-                }
-            }
-        }
-    }
-
-    // 探测打字统计 (input_stats.lua) 是否已启用
+    // 探测打字统计 (input_stats.lua) 是否已启用（必须补丁已挂载且 lua 文件存在）
     let lua_file = u_path.join("lua").join("input_stats.lua");
     let mut stats_patch_detected = false;
     let custom_file = u_path.join(format!("{}.custom.yaml", schema_id));
@@ -3168,7 +3223,7 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
             }
         }
     }
-    toggles.enable_typing_stats = lua_file.exists() && (stats_patch_detected || lua_file.is_file());
+    toggles.enable_typing_stats = lua_file.exists() && stats_patch_detected;
 
     SchemaStateConfig {
         schema_id: schema_id.to_string(),
@@ -3267,6 +3322,11 @@ pub fn update_user_yaml_options(user_dir: &str, toggles: &RimeIceToggles, primar
     opt_map.insert(
         serde_yaml::Value::String("dict_comment".to_string()),
         serde_yaml::Value::Bool(dict_comment_enabled),
+    );
+    let ce_enabled = if toggles.spelling_hints { false } else { toggles.chinese_english };
+    opt_map.insert(
+        serde_yaml::Value::String("chinese_english".to_string()),
+        serde_yaml::Value::Bool(ce_enabled),
     );
 
     if let Ok(serialized) = serde_yaml::to_string(&data) {
@@ -3686,18 +3746,22 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
 
     // 2.5 探测活跃及主流方案（rime_ice, rime_frost, rime_mint, wanxiang 等）的基础 switches 和用户 patch 补丁
     // 优先加载兜底基础方案，最后加载用户当前启用的主方案，确保用户当前方案具备最高覆盖优先级
-    let mut candidate_schema_ids = Vec::new();
-    for default_id in ["rime_ice", "rime_frost", "rime_mint", "wanxiang"] {
-        let s_id = default_id.to_string();
-        if !candidate_schema_ids.contains(&s_id) {
-            candidate_schema_ids.push(s_id);
-        }
-    }
-    for s in &schemas {
-        if s.enabled {
+    let mut candidate_schema_ids = vec![
+        "rime_frost".to_string(),
+        "rime_mint".to_string(),
+        "wanxiang".to_string(),
+        "rime_ice".to_string(),
+    ];
+    let primary_schema_id = schemas.iter().find(|s| s.enabled && s.id != "radical_pinyin" && s.id != "wanxiang_reverse").map(|s| s.id.clone());
+    for s in schemas.iter().rev() {
+        if s.enabled && Some(&s.id) != primary_schema_id.as_ref() {
             candidate_schema_ids.retain(|id| id != &s.id);
             candidate_schema_ids.push(s.id.clone());
         }
+    }
+    if let Some(ref pid) = primary_schema_id {
+        candidate_schema_ids.retain(|id| id != pid);
+        candidate_schema_ids.push(pid.clone());
     }
 
     let detect_any_switch = |val: &serde_yaml::Value, names: &[&str]| -> Option<bool> {
@@ -3736,12 +3800,51 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                     if let Some(b) = detect_switch_reset(&val, "abbrev") { rime_ice_toggles.abbrev = b; }
                     if let Some(b) = detect_spelling_hints_from_val(&val) { rime_ice_toggles.spelling_hints = b; }
                     if let Some(b) = detect_switch_reset(&val, "dict_comment") { rime_ice_toggles.dict_comment = b; }
+
+                    if let Some(translators) = val.get("engine").and_then(|e| e.get("translators")) {
+                        let trans_text = serde_yaml::to_string(translators).unwrap_or_default();
+                        rime_ice_toggles.enable_melt_eng = trans_text.contains("melt_eng");
+                    }
                 }
             }
         }
     }
 
-    // 再读取用户针对方案的 custom.yaml 补丁（拥有最高优先级覆盖）
+    // 先读 user.yaml 中的运行时用户选项作为备选基准
+    let user_yaml_path = u_path.join("user.yaml");
+    if user_yaml_path.exists() {
+        if let Ok(c) = fs::read_to_string(&user_yaml_path) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
+                if let Some(opts) = val.get("var").and_then(|v| v.get("option")) {
+                    if let Some(b) = opts.get("full_shape").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.full_shape = b;
+                    }
+                    if let Some(b) = opts.get("ascii_punct").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.ascii_punct = b;
+                    }
+                    if let Some(b) = opts.get("traditionalization").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.traditionalization = b;
+                    } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.traditionalization = !b;
+                    }
+                    if let Some(b) = opts.get("emoji").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.emoji = b;
+                    }
+                    if let Some(b) = opts.get("search_single_char").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.search_single_char = b;
+                    }
+                    if let Some(b) = opts.get("dict_comment").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.dict_comment = b;
+                    }
+                    if let Some(b) = opts.get("chinese_english").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.chinese_english = b;
+                    }
+                }
+            }
+        }
+    }
+
+    // 再读取用户针对方案的 custom.yaml 补丁（拥有最高优先级覆盖，保证用户设定绝对生效）
     let mut detected_page_keys = Vec::new();
     for sid in &candidate_schema_ids {
         let custom_path = u_path.join(format!("{}.custom.yaml", sid));
@@ -3778,9 +3881,11 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                     if let Some(b) = detect_schema_switch_state(&val, user_dir, sid, &["tone_hint"]) {
                         rime_ice_toggles.spelling_hints = b;
                     }
+                    if let Some(b) = detect_schema_switch_state(&val, user_dir, sid, &["dict_comment"]) {
+                        rime_ice_toggles.dict_comment = b;
+                    }
 
                     if let Some(patch) = val.get("patch") {
-                        println!("custom.yaml patch value: {:?}", patch);
                         if let Some(dc) = patch.get("dict_comment_filter") {
                             if let Some(b) = dc.get("enable_chinese_to_english").and_then(|v| v.as_bool()) {
                                 rime_ice_toggles.dict_comment_chinese_to_english = b;
@@ -3796,14 +3901,35 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                             }
                         }
 
+                        // 探测英文混输补全 (melt_eng)
+                        if let Some(translators) = patch.get("engine/translators") {
+                            let text = serde_yaml::to_string(translators).unwrap_or_default();
+                            rime_ice_toggles.enable_melt_eng = text.contains("melt_eng");
+                        }
+
+                        // 探测部件拆字反查 (radical_pinyin)
+                        if let Some(rad) = patch.get("recognizer/patterns/radical_lookup") {
+                            if let Some(s) = rad.as_str() {
+                                rime_ice_toggles.enable_radical_pinyin = !s.trim().is_empty();
+                            } else if rad.is_null() {
+                                rime_ice_toggles.enable_radical_pinyin = false;
+                            }
+                        }
+
                         // Octagram 语言模型探测
-                        if let Some(lang) = patch.get("grammar/language").and_then(|v| v.as_str())
-                            .or_else(|| patch.get("grammar").and_then(|g| g.get("language")).and_then(|v| v.as_str()))
-                        {
-                            let trimmed = lang.trim();
-                            if !trimmed.is_empty() && trimmed != "~" && trimmed != "null" {
-                                rime_ice_toggles.enable_grammar = true;
-                                rime_ice_toggles.grammar_model = trimmed.to_string();
+                        let lang_val = patch.get("grammar/language")
+                            .or_else(|| patch.get("grammar").and_then(|g| g.get("language")));
+                        if let Some(v) = lang_val {
+                            if let Some(lang) = v.as_str() {
+                                let trimmed = lang.trim();
+                                if !trimmed.is_empty() && trimmed != "~" && trimmed != "null" {
+                                    rime_ice_toggles.enable_grammar = true;
+                                    rime_ice_toggles.grammar_model = trimmed.to_string();
+                                } else {
+                                    rime_ice_toggles.enable_grammar = false;
+                                }
+                            } else if v.is_null() {
+                                rime_ice_toggles.enable_grammar = false;
                             }
                         }
                         if let Some(max_l) = patch.get("grammar/collocation_max_length").and_then(|v| v.as_u64())
@@ -3848,6 +3974,23 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                             rime_ice_toggles.dict_large_char = true;
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // 探测扩展词典清单 (rime_ice.extended.dict.yaml)
+    let ext_dict_path = u_path.join("rime_ice.extended.dict.yaml");
+    if ext_dict_path.exists() {
+        if let Ok(c) = fs::read_to_string(&ext_dict_path) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
+                if let Some(tables) = val.get("import_tables").and_then(|t| t.as_sequence()) {
+                    let list: Vec<String> = tables.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
+                    rime_ice_toggles.dict_large_char = list.iter().any(|t| t.contains("41448"));
+                    rime_ice_toggles.dict_base = list.iter().any(|t| t.ends_with("base"));
+                    rime_ice_toggles.dict_ext = list.iter().any(|t| t.ends_with("ext"));
+                    rime_ice_toggles.dict_tencent = list.iter().any(|t| t.contains("tencent"));
+                    rime_ice_toggles.dict_others = list.iter().any(|t| t.ends_with("others"));
                 }
             }
         }
@@ -3912,37 +4055,6 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
         }
     }
     rime_ice_toggles.enable_typing_stats = lua_file.exists() && stats_patch_detected;
-
-    // 读取 user.yaml 中的运行时用户选项 (Rime 运行态真实持久化状态)
-    let user_yaml_path = u_path.join("user.yaml");
-    if user_yaml_path.exists() {
-        if let Ok(c) = fs::read_to_string(&user_yaml_path) {
-            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
-                if let Some(opts) = val.get("var").and_then(|v| v.get("option")) {
-                    if let Some(b) = opts.get("full_shape").and_then(|v| v.as_bool()) {
-                        rime_ice_toggles.full_shape = b;
-                    }
-                    if let Some(b) = opts.get("ascii_punct").and_then(|v| v.as_bool()) {
-                        rime_ice_toggles.ascii_punct = b;
-                    }
-                    if let Some(b) = opts.get("traditionalization").and_then(|v| v.as_bool()) {
-                        rime_ice_toggles.traditionalization = b;
-                    } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
-                        rime_ice_toggles.traditionalization = !b;
-                    }
-                    if let Some(b) = opts.get("emoji").and_then(|v| v.as_bool()) {
-                        rime_ice_toggles.emoji = b;
-                    }
-                    if let Some(b) = opts.get("search_single_char").and_then(|v| v.as_bool()) {
-                        rime_ice_toggles.search_single_char = b;
-                    }
-                    if let Some(b) = opts.get("dict_comment").and_then(|v| v.as_bool()) {
-                        rime_ice_toggles.dict_comment = b;
-                    }
-                }
-            }
-        }
-    }
 
     let dict_files = scan_installed_dicts(user_dir);
     let custom_dicts = scan_custom_dicts(user_dir);
@@ -4237,6 +4349,44 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     }
 
+    let build_schema_bindings_block = |extra_bindings: &[(&str, &str, &str)]| -> String {
+        let mut lines = Vec::new();
+        if !config.key_bindings.page_up_down_keys.is_empty() {
+            for key in &config.key_bindings.page_up_down_keys {
+                match key.as_str() {
+                    "comma_period" => {
+                        lines.push("    - { when: has_menu, accept: comma, send: Page_Up }".to_string());
+                        lines.push("    - { when: has_menu, accept: period, send: Page_Down }".to_string());
+                    }
+                    "minus_equal" => {
+                        lines.push("    - { when: has_menu, accept: minus, send: Page_Up }".to_string());
+                        lines.push("    - { when: has_menu, accept: equal, send: Page_Down }".to_string());
+                    }
+                    "bracket" => {
+                        lines.push("    - { when: has_menu, accept: bracketleft, send: Page_Up }".to_string());
+                        lines.push("    - { when: has_menu, accept: bracketright, send: Page_Down }".to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (when, accept, toggle) in extra_bindings {
+            lines.push(format!("    - {{ when: {}, accept: \"{}\", toggle: {} }}", when, accept, toggle));
+        }
+        if lines.is_empty() {
+            String::new()
+        } else {
+            let mut res = String::new();
+            res.push_str("\n  # 按键绑定 (翻页与功能快捷开关)\n");
+            res.push_str("  \"key_binder/bindings/+\":\n");
+            for l in lines {
+                res.push_str(&l);
+                res.push('\n');
+            }
+            res
+        }
+    };
+
     // 打字统计采集滤镜补丁
     if config.rime_ice_toggles.enable_typing_stats {
         let _ = ensure_input_stats_lua_installed(user_dir);
@@ -4331,7 +4481,11 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
 
         rime_ice_yaml.push_str(&fuzzy_yaml_block);
-        rime_ice_yaml.push_str(&page_keys_yaml_block);
+        let ice_bindings_block = build_schema_bindings_block(&[
+            ("always", "Control+e", "dict_comment"),
+            ("always", "Control+Shift+E", "dict_comment"),
+        ]);
+        rime_ice_yaml.push_str(&ice_bindings_block);
         rime_ice_yaml.push_str(stats_filter_block);
 
         // 雾凇拼音词库无损外挂清单维护
@@ -4498,7 +4652,11 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             }
 
             frost_yaml.push_str(&fuzzy_yaml_block);
-            frost_yaml.push_str(&page_keys_yaml_block);
+            let frost_bindings_block = build_schema_bindings_block(&[
+                ("always", "Control+e", "chinese_english"),
+                ("always", "Control+Shift+E", "chinese_english"),
+            ]);
+            frost_yaml.push_str(&frost_bindings_block);
             frost_yaml.push_str(stats_filter_block);
 
             // 白霜拼音 Octagram 上下文语言模型补丁
@@ -4584,7 +4742,8 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             mint_yaml.push_str("    initial_quality: 99\n");
 
             mint_yaml.push_str(&fuzzy_yaml_block);
-            mint_yaml.push_str(&page_keys_yaml_block);
+            let mint_bindings_block = build_schema_bindings_block(&[]);
+            mint_yaml.push_str(&mint_bindings_block);
             mint_yaml.push_str(stats_filter_block);
 
             if config.rime_ice_toggles.enable_grammar {
@@ -4676,7 +4835,11 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             }
 
             wx_yaml.push_str(&fuzzy_yaml_block);
-            wx_yaml.push_str(&page_keys_yaml_block);
+            let wx_bindings_block = build_schema_bindings_block(&[
+                ("always", "Control+e", "chinese_english"),
+                ("always", "Control+Shift+E", "chinese_english"),
+            ]);
+            wx_yaml.push_str(&wx_bindings_block);
             wx_yaml.push_str(stats_filter_block);
 
             // 万象拼音 Octagram 语言模型补丁
