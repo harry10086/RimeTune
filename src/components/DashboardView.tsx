@@ -170,6 +170,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div style={{ fontSize: '12px', color: 'var(--text-dim)', wordBreak: 'break-all' }} className="mono">
             {env?.weasel_root || env?.deployer_path || '系统默认路径'}
           </div>
+          {env?.platform === 'linux' && (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+              <span
+                style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: env?.is_lua_available ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                  color: env?.is_lua_available ? '#34d399' : '#f87171',
+                  border: `1px solid ${env?.is_lua_available ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                }}
+              >
+                {env?.is_lua_available ? '✓ librime-lua 扩展就绪' : '✗ 缺少 librime-lua'}
+              </span>
+              <span
+                style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: env?.is_octagram_available ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                  color: env?.is_octagram_available ? '#34d399' : '#f87171',
+                  border: `1px solid ${env?.is_octagram_available ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                }}
+              >
+                {env?.is_octagram_available ? '✓ Octagram 语言模型就绪' : '✗ 缺少 librime-octagram'}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* 方案状态 */}

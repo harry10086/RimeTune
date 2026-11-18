@@ -3142,6 +3142,15 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
                     } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
                         toggles.traditionalization = !b;
                     }
+                    if let Some(b) = opts.get("emoji").and_then(|v| v.as_bool()) {
+                        toggles.emoji = b;
+                    }
+                    if let Some(b) = opts.get("search_single_char").and_then(|v| v.as_bool()) {
+                        toggles.search_single_char = b;
+                    }
+                    if let Some(b) = opts.get("dict_comment").and_then(|v| v.as_bool()) {
+                        toggles.dict_comment = b;
+                    }
                 }
             }
         }
@@ -3231,6 +3240,19 @@ pub fn update_user_yaml_options(user_dir: &str, toggles: &RimeIceToggles, primar
     opt_map.insert(
         serde_yaml::Value::String("zh_simp".to_string()),
         serde_yaml::Value::Bool(!toggles.traditionalization),
+    );
+    opt_map.insert(
+        serde_yaml::Value::String("emoji".to_string()),
+        serde_yaml::Value::Bool(toggles.emoji),
+    );
+    opt_map.insert(
+        serde_yaml::Value::String("search_single_char".to_string()),
+        serde_yaml::Value::Bool(toggles.search_single_char),
+    );
+    let dict_comment_enabled = (toggles.dict_comment_chinese_to_english || toggles.dict_comment_english_to_chinese) && !toggles.spelling_hints;
+    opt_map.insert(
+        serde_yaml::Value::String("dict_comment".to_string()),
+        serde_yaml::Value::Bool(dict_comment_enabled),
     );
 
     if let Ok(serialized) = serde_yaml::to_string(&data) {
@@ -3894,6 +3916,15 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
                     } else if let Some(b) = opts.get("zh_simp").or_else(|| opts.get("simplification")).and_then(|v| v.as_bool()) {
                         rime_ice_toggles.traditionalization = !b;
                     }
+                    if let Some(b) = opts.get("emoji").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.emoji = b;
+                    }
+                    if let Some(b) = opts.get("search_single_char").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.search_single_char = b;
+                    }
+                    if let Some(b) = opts.get("dict_comment").and_then(|v| v.as_bool()) {
+                        rime_ice_toggles.dict_comment = b;
+                    }
                 }
             }
         }
@@ -4255,7 +4286,7 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             resets.insert(i, if config.rime_ice_toggles.emoji { 1 } else { 0 });
         }
         if let Some(i) = resolve_switch_index_for_schema(user_dir, "rime_ice", "dict_comment") {
-            let dc_val = if config.rime_ice_toggles.spelling_hints { 0 } else if config.rime_ice_toggles.dict_comment_chinese_to_english { 1 } else { 0 };
+            let dc_val = if config.rime_ice_toggles.spelling_hints { 0 } else if config.rime_ice_toggles.dict_comment_chinese_to_english || config.rime_ice_toggles.dict_comment_english_to_chinese { 1 } else { 0 };
             resets.insert(i, dc_val);
         }
         append_switch_resets(&mut rime_ice_yaml, &resets);

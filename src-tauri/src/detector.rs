@@ -34,6 +34,8 @@ pub struct EnvironmentStatus {
     pub recommended_phrase_file: String,
     pub is_double_pinyin: bool,
     pub available_grammar_models: Vec<GrammarModelItem>,
+    pub is_lua_available: bool,
+    pub is_octagram_available: bool,
 }
 
 pub fn detect_weasel_paths() -> (Option<String>, Option<String>, Option<String>) {
@@ -626,6 +628,25 @@ pub fn inspect_environment() -> EnvironmentStatus {
 
     let available_grammar_models = scan_grammar_models(&user_path);
 
+    let (is_lua_available, is_octagram_available) = {
+        #[cfg(target_os = "linux")]
+        {
+            let plugin_dirs = [
+                "/usr/lib64/rime-plugins",
+                "/usr/lib/x86_64-linux-gnu/rime-plugins",
+                "/usr/lib/rime-plugins",
+                "/usr/local/lib/rime-plugins",
+            ];
+            let has_lua = plugin_dirs.iter().any(|d| Path::new(d).join("librime-lua.so").exists());
+            let has_octa = plugin_dirs.iter().any(|d| Path::new(d).join("librime-octagram.so").exists());
+            (has_lua, has_octa)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            (true, true)
+        }
+    };
+
     EnvironmentStatus {
         platform,
         host_id,
@@ -645,6 +666,8 @@ pub fn inspect_environment() -> EnvironmentStatus {
         recommended_phrase_file,
         is_double_pinyin,
         available_grammar_models,
+        is_lua_available,
+        is_octagram_available,
     }
 }
 

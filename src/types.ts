@@ -24,6 +24,8 @@ export interface EnvironmentStatus {
   recommended_phrase_file?: string;
   is_double_pinyin?: boolean;
   available_grammar_models?: GrammarModelItem[];
+  is_lua_available?: boolean;
+  is_octagram_available?: boolean;
 }
 
 export interface PhraseFileInfo {
