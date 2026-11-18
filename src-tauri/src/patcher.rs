@@ -4327,64 +4327,65 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     }
 
     let mut page_keys_yaml_block = String::new();
-    if !config.key_bindings.page_up_down_keys.is_empty() {
-        page_keys_yaml_block.push_str("\n  # 翻页按键绑定 (支持多选启用)\n");
-        page_keys_yaml_block.push_str("  \"key_binder/bindings/+\":\n");
-        for key in &config.key_bindings.page_up_down_keys {
-            match key.as_str() {
-                "comma_period" => {
-                    page_keys_yaml_block.push_str("    - { when: has_menu, accept: comma, send: Page_Up }\n");
-                    page_keys_yaml_block.push_str("    - { when: has_menu, accept: period, send: Page_Down }\n");
-                }
-                "minus_equal" => {
-                    page_keys_yaml_block.push_str("    - { when: has_menu, accept: minus, send: Page_Up }\n");
-                    page_keys_yaml_block.push_str("    - { when: has_menu, accept: equal, send: Page_Down }\n");
-                }
-                "bracket" => {
-                    page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketleft, send: Page_Up }\n");
-                    page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketright, send: Page_Down }\n");
-                }
-                _ => {}
-            }
-        }
+    page_keys_yaml_block.push_str("\n  # 全局翻页按键控制\n");
+    page_keys_yaml_block.push_str("  \"key_binder/bindings/+\":\n");
+    if config.key_bindings.page_up_down_keys.contains(&"comma_period".to_string()) {
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: comma, send: Page_Up }\n");
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: period, send: Page_Down }\n");
+    } else {
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: comma, send: comma }\n");
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: period, send: period }\n");
+    }
+    if config.key_bindings.page_up_down_keys.contains(&"minus_equal".to_string()) {
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: minus, send: Page_Up }\n");
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: equal, send: Page_Down }\n");
+    } else {
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: minus, send: minus }\n");
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: equal, send: equal }\n");
+    }
+    if config.key_bindings.page_up_down_keys.contains(&"bracket".to_string()) {
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketleft, send: Page_Up }\n");
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketright, send: Page_Down }\n");
+    } else {
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketleft, send: bracketleft }\n");
+        page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketright, send: bracketright }\n");
     }
 
     let build_schema_bindings_block = |extra_bindings: &[(&str, &str, &str)]| -> String {
         let mut lines = Vec::new();
-        if !config.key_bindings.page_up_down_keys.is_empty() {
-            for key in &config.key_bindings.page_up_down_keys {
-                match key.as_str() {
-                    "comma_period" => {
-                        lines.push("    - { when: has_menu, accept: comma, send: Page_Up }".to_string());
-                        lines.push("    - { when: has_menu, accept: period, send: Page_Down }".to_string());
-                    }
-                    "minus_equal" => {
-                        lines.push("    - { when: has_menu, accept: minus, send: Page_Up }".to_string());
-                        lines.push("    - { when: has_menu, accept: equal, send: Page_Down }".to_string());
-                    }
-                    "bracket" => {
-                        lines.push("    - { when: has_menu, accept: bracketleft, send: Page_Up }".to_string());
-                        lines.push("    - { when: has_menu, accept: bracketright, send: Page_Down }".to_string());
-                    }
-                    _ => {}
-                }
-            }
+        if config.key_bindings.page_up_down_keys.contains(&"comma_period".to_string()) {
+            lines.push("    - { when: has_menu, accept: comma, send: Page_Up }".to_string());
+            lines.push("    - { when: has_menu, accept: period, send: Page_Down }".to_string());
+        } else {
+            lines.push("    - { when: has_menu, accept: comma, send: comma }".to_string());
+            lines.push("    - { when: has_menu, accept: period, send: period }".to_string());
+        }
+        if config.key_bindings.page_up_down_keys.contains(&"minus_equal".to_string()) {
+            lines.push("    - { when: has_menu, accept: minus, send: Page_Up }".to_string());
+            lines.push("    - { when: has_menu, accept: equal, send: Page_Down }".to_string());
+        } else {
+            lines.push("    - { when: has_menu, accept: minus, send: minus }".to_string());
+            lines.push("    - { when: has_menu, accept: equal, send: equal }".to_string());
+        }
+        if config.key_bindings.page_up_down_keys.contains(&"bracket".to_string()) {
+            lines.push("    - { when: has_menu, accept: bracketleft, send: Page_Up }".to_string());
+            lines.push("    - { when: has_menu, accept: bracketright, send: Page_Down }".to_string());
+        } else {
+            lines.push("    - { when: has_menu, accept: bracketleft, send: bracketleft }".to_string());
+            lines.push("    - { when: has_menu, accept: bracketright, send: bracketright }".to_string());
         }
         for (when, accept, toggle) in extra_bindings {
             lines.push(format!("    - {{ when: {}, accept: \"{}\", toggle: {} }}", when, accept, toggle));
         }
-        if lines.is_empty() {
-            String::new()
-        } else {
-            let mut res = String::new();
-            res.push_str("\n  # 按键绑定 (翻页与功能快捷开关)\n");
-            res.push_str("  \"key_binder/bindings/+\":\n");
-            for l in lines {
-                res.push_str(&l);
-                res.push('\n');
-            }
-            res
+
+        let mut res = String::new();
+        res.push_str("\n  # 按键绑定 (翻页与功能快捷开关)\n");
+        res.push_str("  \"key_binder/bindings/+\":\n");
+        for l in lines {
+            res.push_str(&l);
+            res.push('\n');
         }
+        res
     };
 
     // 打字统计采集滤镜补丁

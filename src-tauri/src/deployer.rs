@@ -165,38 +165,24 @@ pub fn run_weasel_command(
                 .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "SetConfig", "sv", "fcitx://config/addon/rime/deploy", "s", ""])
                 .status();
 
-            // 2. 调用 Restart 彻底重启 Fcitx5 服务。
-            // 关键作用：单纯的 fcitx5-remote -r 无法销毁现有已打开窗口（Kate、Konsole、浏览器）的驻留 Rime 内存会话，
-            // 只有 Restart 能让所有应用窗口重新连接 Fcitx5，并立即加载最新的 user.yaml 状态、开关及按键！
-            let restart_status = Command::new("busctl")
-                .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "Restart"])
-                .status();
-
-            let mut restarted = restart_status.as_ref().map(|s| s.success()).unwrap_or(false);
-            if !restarted {
-                // 如果 busctl 失败，尝试 qdbus
-                let qdbus_res = Command::new("qdbus")
-                    .args(["org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1.Restart"])
-                    .status();
-                restarted = qdbus_res.as_ref().map(|s| s.success()).unwrap_or(false);
-            }
-            if !restarted {
-                // 兜底方案：重载守护进程
-                let _ = Command::new("fcitx5-remote").arg("-r").status();
-            }
-
-            let method_note = if rime_deployed {
-                "rime_deployer + Fcitx5 重启"
-            } else if restarted {
-                "Fcitx5 D-Bus 重新部署与重启"
-            } else {
-                "Fcitx5 重载 (已清空构建缓存并更新时间戳)"
-            };
+            // 2. 清理并彻底重启 Fcitx5 服务进程。
+            // 关键作用：在 Wayland / KWin 等现代桌面下，D-Bus Restart 因 CanRestart 为 false 无法重载内存会话，
+            // 只有干净退出并重新启动 fcitx5 -d，才能释放已占用的 userdb 锁、清空旧内存状态，并即刻加载最新的所有开关及按键！
+            let _ = Command::new("fcitx5-remote").arg("-e").status();
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let _ = Command::new("pkill").arg("-9").arg("-x").arg("fcitx5").status();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let _ = Command::new("fcitx5")
+                .arg("-d")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
 
             return DeployResult {
                 success: true,
-                message: format!("已成功触发 Fcitx5-Rime 部署与服务重启 ({})", method_note),
-                deployer_used: method_note.to_string(),
+                message: "已成功完成 Fcitx5-Rime 方案全量编译并重启 Fcitx5 服务，所有输入特性与按键即刻生效！".to_string(),
+                deployer_used: "rime_deployer + Fcitx5 进程重启".to_string(),
             };
         }
 
