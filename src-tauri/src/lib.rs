@@ -1120,12 +1120,81 @@ switches:
         assert!(user_yaml.contains("ascii_punct: true"));
         assert!(user_yaml.contains("zh_simp: true"));
         assert!(user_yaml.contains("traditionalization: false"));
+        assert!(user_yaml.contains("previously_selected_schema: luna_pinyin_simp"));
 
         let reloaded = patcher::load_unified_config(u_str);
         assert!(reloaded.rime_ice_toggles.spelling_hints);
         assert!(reloaded.rime_ice_toggles.full_shape);
         assert!(reloaded.rime_ice_toggles.ascii_punct);
         assert!(!reloaded.rime_ice_toggles.traditionalization);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_primary_schema_user_yaml_sync() {
+        use crate::patcher::SchemaItem;
+        let temp_dir = std::env::temp_dir().join(format!("rimetune_schema_sync_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let u_str = temp_dir.to_str().unwrap();
+
+        std::fs::write(temp_dir.join("rime_ice.schema.yaml"), "schema:\n  schema_id: rime_ice\n  name: 雾凇拼音\n").unwrap();
+        std::fs::write(temp_dir.join("luna_pinyin_simp.schema.yaml"), "schema:\n  schema_id: luna_pinyin_simp\n  name: 朙月拼音·简化字\n").unwrap();
+
+        let mut config = patcher::load_unified_config(u_str);
+        config.schemas = vec![
+            SchemaItem {
+                id: "rime_ice".to_string(),
+                name: "雾凇拼音".to_string(),
+                enabled: true,
+                description: "".to_string(),
+                file_path: temp_dir.join("rime_ice.schema.yaml").to_str().unwrap().to_string(),
+            },
+            SchemaItem {
+                id: "luna_pinyin_simp".to_string(),
+                name: "朙月拼音·简化字".to_string(),
+                enabled: true,
+                description: "".to_string(),
+                file_path: temp_dir.join("luna_pinyin_simp.schema.yaml").to_str().unwrap().to_string(),
+            },
+        ];
+
+        let res = patcher::save_unified_config(u_str, config.clone());
+        assert!(res.is_ok());
+
+        // 验证 user.yaml 正确写入了 rime_ice
+        let user_yaml = std::fs::read_to_string(temp_dir.join("user.yaml")).unwrap();
+        assert!(user_yaml.contains("previously_selected_schema: rime_ice"), "user.yaml must record rime_ice as previously_selected_schema");
+        assert!(user_yaml.contains("schema_access_time"), "user.yaml must have schema_access_time");
+
+        let scanned = patcher::scan_actual_installed_schemas(u_str);
+        assert_eq!(scanned[0].id, "rime_ice");
+
+        // 切换顺序：将 luna_pinyin_simp 设为第 1 方案
+        config.schemas = vec![
+            SchemaItem {
+                id: "luna_pinyin_simp".to_string(),
+                name: "朙月拼音·简化字".to_string(),
+                enabled: true,
+                description: "".to_string(),
+                file_path: temp_dir.join("luna_pinyin_simp.schema.yaml").to_str().unwrap().to_string(),
+            },
+            SchemaItem {
+                id: "rime_ice".to_string(),
+                name: "雾凇拼音".to_string(),
+                enabled: true,
+                description: "".to_string(),
+                file_path: temp_dir.join("rime_ice.schema.yaml").to_str().unwrap().to_string(),
+            },
+        ];
+        let res2 = patcher::save_unified_config(u_str, config);
+        assert!(res2.is_ok());
+
+        let user_yaml2 = std::fs::read_to_string(temp_dir.join("user.yaml")).unwrap();
+        assert!(user_yaml2.contains("previously_selected_schema: luna_pinyin_simp"), "user.yaml must switch previously_selected_schema to luna_pinyin_simp");
+
+        let scanned2 = patcher::scan_actual_installed_schemas(u_str);
+        assert_eq!(scanned2[0].id, "luna_pinyin_simp");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

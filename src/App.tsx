@@ -339,6 +339,14 @@ export function App() {
       setLastDeployResult(res);
       showToast(res.message, res.success ? 'success' : 'error');
 
+      // 刷新环境状态（确保当前主方案、补丁等即时同步）
+      try {
+        const refreshedEnv = await invoke<EnvironmentStatus>('get_environment_status');
+        setEnv(refreshedEnv);
+      } catch (e) {
+        console.warn('Refresh environment status failed:', e);
+      }
+
       // 刷新快照列表
       const snaps = await invoke<BackupSnapshot[]>('list_backup_snapshots', {
         userDir: env.rime_user_dir,
@@ -362,6 +370,14 @@ export function App() {
       });
       setLastDeployResult(res);
       showToast(res.message, res.success ? 'success' : 'error');
+
+      // 刷新环境状态
+      try {
+        const refreshedEnv = await invoke<EnvironmentStatus>('get_environment_status');
+        setEnv(refreshedEnv);
+      } catch (e) {
+        console.warn('Refresh environment status failed:', e);
+      }
     } catch (err: any) {
       showToast(`部署异常: ${err}`, 'error');
     } finally {

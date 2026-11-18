@@ -177,6 +177,16 @@ export const KeysView: React.FC<KeysViewProps> = ({
     onSchemasChange([...enabledList, ...disabledList]);
   };
 
+  const setAsPrimarySchema = (id: string) => {
+    const enabledList = schemas.filter((s) => s.enabled);
+    const disabledList = schemas.filter((s) => !s.enabled);
+    const idx = enabledList.findIndex((s) => s.id === id);
+    if (idx <= 0) return;
+    const [target] = enabledList.splice(idx, 1);
+    enabledList.unshift(target);
+    onSchemasChange([...enabledList, ...disabledList]);
+  };
+
   const shiftOptions = [
     { value: 'commit_text', label: '首选词上屏并切英文 (commit_text - 类似微软/搜狗拼音，推荐)' },
     { value: 'clear', label: '清空未上屏拼音并切英文 (clear - 放弃当前输入)' },
@@ -735,17 +745,37 @@ export const KeysView: React.FC<KeysViewProps> = ({
                         🌟 首选默认方案
                       </span>
                     ) : (
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          padding: '1px 7px',
-                          borderRadius: '4px',
-                          backgroundColor: 'var(--bg-elevated)',
-                          color: 'var(--text-muted)',
-                        }}
-                      >
-                        备选 #{idx + 1}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            padding: '1px 7px',
+                            borderRadius: '4px',
+                            backgroundColor: 'var(--bg-elevated)',
+                            color: 'var(--text-muted)',
+                          }}
+                        >
+                          备选 #{idx + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setAsPrimarySchema(s.id)}
+                          style={{
+                            fontSize: '11px',
+                            padding: '1px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                            color: '#38bdf8',
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            lineHeight: 1.4,
+                          }}
+                          title="一键将该方案提升为 #1 默认首选方案"
+                        >
+                          设为首选
+                        </button>
+                      </div>
                     )}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>

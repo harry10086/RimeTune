@@ -388,48 +388,29 @@ pub fn inspect_environment() -> EnvironmentStatus {
     // 探测当前激活的输入方案
     let mut detected_id_opt: Option<String> = None;
 
-    // 0. 最高优先级：从 user.yaml 读取运行时用户真实激活的输入方案 (previously_selected_schema)
-    let user_yaml = user_path.join("user.yaml");
-    if user_yaml.exists() {
-        if let Ok(content) = std::fs::read_to_string(&user_yaml) {
+    // 0. 先尝试读取 default.custom.yaml 中的用户显式设定的 schema_list
+    let mut custom_schema_list: Vec<String> = Vec::new();
+    let default_custom = user_path.join("default.custom.yaml");
+    if default_custom.exists() {
+        if let Ok(content) = std::fs::read_to_string(&default_custom) {
             if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                if let Some(prev) = val.get("var").and_then(|v| v.get("previously_selected_schema")).and_then(|s| s.as_str()) {
-                    let trimmed = prev.trim();
-                    if !trimmed.is_empty() {
-                        detected_id_opt = Some(trimmed.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    // 1. 其次从 default.custom.yaml 获取用户当前配置的第一方案
-    if detected_id_opt.is_none() {
-        let default_custom = user_path.join("default.custom.yaml");
-        if default_custom.exists() {
-            if let Ok(content) = std::fs::read_to_string(&default_custom) {
-                if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                    if let Some(patch) = val.get("patch") {
-                        if let Some(schema_list) = patch.get("schema_list").and_then(|l| l.as_sequence()) {
-                            if let Some(first) = schema_list.first() {
-                                if let Some(schema) = first.get("schema").and_then(|s| s.as_str()) {
-                                    detected_id_opt = Some(schema.to_string());
-                                }
+                if let Some(patch) = val.get("patch") {
+                    if let Some(schema_list) = patch.get("schema_list").and_then(|l| l.as_sequence()) {
+                        for item in schema_list {
+                            if let Some(s) = item.get("schema").and_then(|s| s.as_str()) {
+                                custom_schema_list.push(s.to_string());
                             }
                         }
-                        if detected_id_opt.is_none() {
-                            if let Some(map) = patch.as_mapping() {
-                                for (k, v) in map {
-                                    if let Some(k_str) = k.as_str() {
-                                        if k_str.contains("schema_list") && k_str.contains("@0") {
-                                            if let Some(s) = v.get("schema").and_then(|s| s.as_str()) {
-                                                detected_id_opt = Some(s.to_string());
-                                                break;
-                                            } else if let Some(s) = v.as_str() {
-                                                detected_id_opt = Some(s.to_string());
-                                                break;
-                                            }
-                                        }
+                    } else if let Some(map) = patch.as_mapping() {
+                        for (k, v) in map {
+                            if let Some(k_str) = k.as_str() {
+                                if k_str.contains("schema_list") && k_str.contains("@0") {
+                                    if let Some(s) = v.get("schema").and_then(|s| s.as_str()) {
+                                        custom_schema_list.push(s.to_string());
+                                        break;
+                                    } else if let Some(s) = v.as_str() {
+                                        custom_schema_list.push(s.to_string());
+                                        break;
                                     }
                                 }
                             }
@@ -437,6 +418,34 @@ pub fn inspect_environment() -> EnvironmentStatus {
                     }
                 }
             }
+        }
+    }
+
+    // 1. 最高优先级：从 user.yaml 读取运行时真实激活的输入方案 (previously_selected_schema)
+    let user_yaml = user_path.join("user.yaml");
+    if user_yaml.exists() {
+        if let Ok(content) = std::fs::read_to_string(&user_yaml) {
+            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                if let Some(prev) = val.get("var").and_then(|v| v.get("previously_selected_schema")).and_then(|s| s.as_str()) {
+                    let trimmed = prev.trim();
+                    if !trimmed.is_empty() {
+                        let in_custom = custom_schema_list.is_empty() || custom_schema_list.iter().any(|id| id == trimmed);
+                        if in_custom {
+                            let exists = data_dirs.iter().any(|d| d.join(format!("{}.schema.yaml", trimmed)).exists());
+                            if exists {
+                                detected_id_opt = Some(trimmed.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 其次从 default.custom.yaml 获取用户当前配置的第一方案
+    if detected_id_opt.is_none() && !custom_schema_list.is_empty() {
+        if let Some(first) = custom_schema_list.first() {
+            detected_id_opt = Some(first.clone());
         }
     }
 

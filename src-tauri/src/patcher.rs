@@ -981,6 +981,45 @@ pub fn scan_actual_installed_schemas(user_dir: &str) -> Vec<SchemaItem> {
     let mut schemas = Vec::new();
     let u_path = Path::new(user_dir);
 
+    // 确定所有需要扫描方案的目录（严格仅扫描用户配置根目录与系统预置共享 data 根目录，绝对不扫描 build/backup/sync 等子目录）
+    let (detected_root, _, _) = crate::detector::detect_weasel_paths();
+    let mut scan_dirs = vec![u_path.to_path_buf()];
+    if let Some(wr) = detected_root {
+        let p = Path::new(&wr).join("data");
+        if p.exists() && !scan_dirs.contains(&p) {
+            scan_dirs.push(p);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for dir in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
+            let p = PathBuf::from(dir);
+            if p.exists() && !scan_dirs.contains(&p) {
+                scan_dirs.push(p);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let p = PathBuf::from("/Library/Input Methods/Squirrel.app/Contents/SharedSupport");
+        if p.exists() && !scan_dirs.contains(&p) {
+            scan_dirs.push(p);
+        }
+    }
+    #[cfg(windows)]
+    {
+        for fallback in &[
+            r"C:\Program Files\Rime\weasel-0.17.0\data",
+            r"C:\Program Files\Rime\weasel\data",
+            r"C:\Program Files (x86)\Rime\weasel\data",
+        ] {
+            let fb_path = PathBuf::from(fallback);
+            if fb_path.exists() && !scan_dirs.contains(&fb_path) {
+                scan_dirs.push(fb_path);
+            }
+        }
+    }
+
     // 0. 读取 user.yaml 中的 previously_selected_schema 作为最高优先级激活首选方案
     let mut previously_selected = None;
     let user_yaml = u_path.join("user.yaml");
@@ -1051,53 +1090,15 @@ pub fn scan_actual_installed_schemas(user_dir: &str) -> Vec<SchemaItem> {
         }
     }
 
-    // 若 user.yaml 指定了当前运行态真实激活的方案，将其置顶于 active_ids 的首位
+    // 若 user.yaml 指定了当前运行态真实激活的方案，且其处于当前有效方案列表中，将其置顶于 active_ids 的首位
     if let Some(prev) = previously_selected {
         if let Some(pos) = active_ids.iter().position(|id| id == &prev) {
             active_ids.remove(pos);
             active_ids.insert(0, prev);
-        } else if !active_ids.is_empty() {
-            active_ids.insert(0, prev);
-        } else {
-            active_ids.push(prev);
-        }
-    }
-
-    // 确定所有需要扫描方案的目录（严格仅扫描用户配置根目录与系统预置共享 data 根目录，绝对不扫描 build/backup/sync 等子目录）
-    let (detected_root, _, _) = crate::detector::detect_weasel_paths();
-    let mut scan_dirs = vec![u_path.to_path_buf()];
-    if let Some(wr) = detected_root {
-        let p = Path::new(&wr).join("data");
-        if p.exists() && !scan_dirs.contains(&p) {
-            scan_dirs.push(p);
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        for dir in &["/usr/share/rime-data", "/usr/local/share/rime-data", "/usr/share/rime"] {
-            let p = PathBuf::from(dir);
-            if p.exists() && !scan_dirs.contains(&p) {
-                scan_dirs.push(p);
-            }
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let p = PathBuf::from("/Library/Input Methods/Squirrel.app/Contents/SharedSupport");
-        if p.exists() && !scan_dirs.contains(&p) {
-            scan_dirs.push(p);
-        }
-    }
-    #[cfg(windows)]
-    {
-        for fallback in &[
-            r"C:\Program Files\Rime\weasel-0.17.0\data",
-            r"C:\Program Files\Rime\weasel\data",
-            r"C:\Program Files (x86)\Rime\weasel\data",
-        ] {
-            let fb_path = PathBuf::from(fallback);
-            if fb_path.exists() && !scan_dirs.contains(&fb_path) {
-                scan_dirs.push(fb_path);
+        } else if active_ids.is_empty() {
+            let exists = scan_dirs.iter().any(|d| d.join(format!("{}.schema.yaml", prev)).exists());
+            if exists {
+                active_ids.push(prev);
             }
         }
     }
@@ -3153,8 +3154,8 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
     }
 }
 
-/// 维护 user.yaml 中的 var/option 字段，确保 librime 运行时状态与用户设置一致
-pub fn update_user_yaml_options(user_dir: &str, toggles: &RimeIceToggles) {
+/// 维护 user.yaml 中的 var/option 字段及主输入方案激活状态，确保 librime 运行时状态与用户设置一致
+pub fn update_user_yaml_options(user_dir: &str, toggles: &RimeIceToggles, primary_schema_id: Option<&str>) {
     let u_path = Path::new(user_dir);
     let user_yaml_path = u_path.join("user.yaml");
     let mut data: serde_yaml::Value = if user_yaml_path.exists() {
@@ -3177,6 +3178,34 @@ pub fn update_user_yaml_options(user_dir: &str, toggles: &RimeIceToggles) {
     }
 
     let var_map = map.get_mut(&var_key).unwrap().as_mapping_mut().unwrap();
+
+    // 同步主输入方案激活状态至 user.yaml (previously_selected_schema 及访问时间戳)
+    if let Some(schema_id) = primary_schema_id {
+        let trimmed_id = schema_id.trim();
+        if !trimmed_id.is_empty() {
+            var_map.insert(
+                serde_yaml::Value::String("previously_selected_schema".to_string()),
+                serde_yaml::Value::String(trimmed_id.to_string()),
+            );
+
+            // 更新 schema_access_time
+            let sat_key = serde_yaml::Value::String("schema_access_time".to_string());
+            if !var_map.contains_key(&sat_key) || !var_map[&sat_key].is_mapping() {
+                var_map.insert(sat_key.clone(), serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+            }
+            if let Some(sat_map) = var_map.get_mut(&sat_key).and_then(|v| v.as_mapping_mut()) {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                sat_map.insert(
+                    serde_yaml::Value::String(trimmed_id.to_string()),
+                    serde_yaml::Value::Number(serde_yaml::Number::from(now)),
+                );
+            }
+        }
+    }
+
     let option_key = serde_yaml::Value::String("option".to_string());
     if !var_map.contains_key(&option_key) || !var_map[&option_key].is_mapping() {
         var_map.insert(option_key.clone(), serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
@@ -3893,7 +3922,10 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     }
 
     // 0. 同步维护 user.yaml 运行时状态，确保切换即刻真实生效
-    update_user_yaml_options(user_dir, &config.rime_ice_toggles);
+    let primary_schema_id = config.schemas.iter()
+        .find(|s| s.enabled && s.id != "radical_pinyin" && s.id != "wanxiang_reverse")
+        .map(|s| s.id.as_str());
+    update_user_yaml_options(user_dir, &config.rime_ice_toggles, primary_schema_id);
 
     // 1. 保存 weasel.custom.yaml
     let mut weasel_yaml = String::new();
