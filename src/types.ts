@@ -26,6 +26,9 @@ export interface EnvironmentStatus {
   available_grammar_models?: GrammarModelItem[];
   is_lua_available?: boolean;
   is_octagram_available?: boolean;
+  is_opencc_available?: boolean;
+  linux_pkg_manager?: string;
+  linux_install_command?: string;
 }
 
 export interface PhraseFileInfo {

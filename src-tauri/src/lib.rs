@@ -6,7 +6,7 @@ pub mod phrases;
 pub mod sync;
 
 use detector::{inspect_environment, EnvironmentStatus};
-use deployer::{trigger_deploy, DeployResult};
+use deployer::{trigger_deploy, install_linux_plugins as install_linux_plugins_impl, DeployResult};
 use backup::{create_snapshot, list_snapshots, restore_snapshot, compare_diff, BackupSnapshot, DiffItem};
 use patcher::{load_unified_config, save_unified_config, UnifiedFullConfig};
 use phrases::{read_custom_phrases, save_custom_phrases as save_phrases_impl, CustomPhraseItem};
@@ -57,6 +57,13 @@ async fn trigger_weasel_deploy(deployer_path: Option<String>) -> DeployResult {
         message: format!("部署任务调度异常: {}", e),
         deployer_used: String::new(),
     })
+}
+
+#[tauri::command]
+async fn install_linux_plugins() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        install_linux_plugins_impl()
+    }).await.map_err(|e| format!("执行安装任务失败: {e}"))?
 }
 
 #[tauri::command]
@@ -716,6 +723,7 @@ pub fn run() {
             get_typing_stats_status,
             set_typing_stats_enabled,
             check_for_updates,
+            install_linux_plugins,
         ])
         .run(tauri::generate_context!())
         .expect("error while running WeaselTune");

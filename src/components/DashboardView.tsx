@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { EnvironmentStatus, DeployResult } from '../types';
-import { CheckCircle2, AlertTriangle, RefreshCw, Folder, Cpu, Sparkles, BookOpen, FolderOpen } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, RefreshCw, Folder, Cpu, Sparkles, BookOpen, FolderOpen, Download, Copy, Check } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface DashboardViewProps {
@@ -23,6 +23,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
 }) => {
   const [openingDir, setOpeningDir] = useState(false);
+  const [installingPlugins, setInstallingPlugins] = useState(false);
+  const [pluginInstallMsg, setPluginInstallMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState(false);
+
+  const handleInstallPlugins = async () => {
+    setInstallingPlugins(true);
+    setPluginInstallMsg(null);
+    try {
+      const res = await invoke<string>('install_linux_plugins');
+      setPluginInstallMsg({ success: true, text: res });
+      onRefreshEnv();
+    } catch (err: any) {
+      setPluginInstallMsg({ success: false, text: err?.toString() || '安装失败' });
+    } finally {
+      setInstallingPlugins(false);
+    }
+  };
+
+  const handleCopyCmd = () => {
+    if (env?.linux_install_command) {
+      navigator.clipboard.writeText(env.linux_install_command);
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 2500);
+    }
+  };
 
   const handleOpenDir = async () => {
     if (!env?.rime_user_dir) return;
@@ -171,31 +196,119 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {env?.weasel_root || env?.deployer_path || '系统默认路径'}
           </div>
           {env?.platform === 'linux' && (
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
-              <span
-                style={{
-                  fontSize: '11px',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: env?.is_lua_available ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                  color: env?.is_lua_available ? '#34d399' : '#f87171',
-                  border: `1px solid ${env?.is_lua_available ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                }}
-              >
-                {env?.is_lua_available ? '✓ librime-lua 扩展就绪' : '✗ 缺少 librime-lua'}
-              </span>
-              <span
-                style={{
-                  fontSize: '11px',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: env?.is_octagram_available ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                  color: env?.is_octagram_available ? '#34d399' : '#f87171',
-                  border: `1px solid ${env?.is_octagram_available ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                }}
-              >
-                {env?.is_octagram_available ? '✓ Octagram 语言模型就绪' : '✗ 缺少 librime-octagram'}
-              </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: env?.is_lua_available ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    color: env?.is_lua_available ? '#34d399' : '#f87171',
+                    border: `1px solid ${env?.is_lua_available ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  }}
+                >
+                  {env?.is_lua_available ? '✓ librime-lua 扩展就绪' : '✗ 缺少 librime-lua'}
+                </span>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: env?.is_octagram_available ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    color: env?.is_octagram_available ? '#34d399' : '#f87171',
+                    border: `1px solid ${env?.is_octagram_available ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  }}
+                >
+                  {env?.is_octagram_available ? '✓ Octagram 语言模型就绪' : '✗ 缺少 librime-octagram'}
+                </span>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: env?.is_opencc_available ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    color: env?.is_opencc_available ? '#34d399' : '#f87171',
+                    border: `1px solid ${env?.is_opencc_available ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  }}
+                >
+                  {env?.is_opencc_available ? '✓ OpenCC 工具就绪' : '✗ 缺少 opencc-tools'}
+                </span>
+              </div>
+
+              {(!env?.is_lua_available || !env?.is_octagram_available || !env?.is_opencc_available) && (
+                <div
+                  style={{
+                    marginTop: '6px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: '#f87171', lineHeight: '1.5' }}>
+                    ⚠️ 检测到系统缺少 Linux Rime 必备插件与工具（导致词典释义、打字统计、Emoji 表情或语言模型无法工作）。
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      onClick={handleInstallPlugins}
+                      disabled={installingPlugins}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        backgroundColor: '#ef4444',
+                        color: '#fff',
+                        border: 'none',
+                        cursor: installingPlugins ? 'not-allowed' : 'pointer',
+                        opacity: installingPlugins ? 0.7 : 1,
+                      }}
+                    >
+                      <Download size={14} className={installingPlugins ? 'spin' : ''} />
+                      {installingPlugins ? '正在调起授权安装...' : '一键安装缺失插件与工具'}
+                    </button>
+                    {env?.linux_install_command && (
+                      <button
+                        onClick={handleCopyCmd}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          padding: '6px 10px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          backgroundColor: 'var(--bg-elevated)',
+                          color: 'var(--text-main)',
+                          border: '1px solid var(--border)',
+                          cursor: 'pointer',
+                        }}
+                        title={env.linux_install_command}
+                      >
+                        {copiedCmd ? <Check size={14} color="#34d399" /> : <Copy size={14} />}
+                        {copiedCmd ? '已复制命令' : '复制终端安装命令'}
+                      </button>
+                    )}
+                  </div>
+                  {pluginInstallMsg && (
+                    <div
+                      style={{
+                        fontSize: '12px',
+                        color: pluginInstallMsg.success ? '#34d399' : '#f87171',
+                      }}
+                    >
+                      {pluginInstallMsg.text}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

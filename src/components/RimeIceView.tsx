@@ -1730,7 +1730,9 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderRadius: '10px', backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>部件拆字反查 (radical_pinyin)</div>
-                <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>通过拆分部首输入生僻字（输入 u 引导）</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                  通过拆分部首输入生僻字（输入 <span style={{ color: '#38bdf8', fontWeight: 700 }}>uU</span> 引导，如输入 <code style={{ backgroundColor: 'var(--bg-elevated)', padding: '1px 5px', borderRadius: '4px' }}>uUhuohuo</code> 查“炎”）
+                </div>
               </div>
               <label className="toggle-switch">
                 <input

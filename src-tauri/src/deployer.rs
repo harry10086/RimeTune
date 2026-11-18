@@ -70,6 +70,41 @@ pub fn run_weasel_command(
             if default_yaml.exists() {
                 let _ = std::fs::remove_file(default_yaml);
             }
+
+            // 自动检查并预编译 OpenCC 二进制字典（如 emoji.ocd2、others.ocd2 等）
+            let opencc_dict_bin = ["/usr/bin/opencc_dict", "/usr/local/bin/opencc_dict"]
+                .into_iter()
+                .find(|p| std::path::Path::new(p).exists());
+            if let Some(ocd_bin) = opencc_dict_bin {
+                let opencc_dir = u_path.join("opencc");
+                if opencc_dir.exists() {
+                    if let Ok(entries) = std::fs::read_dir(&opencc_dir) {
+                        for entry in entries.flatten() {
+                            let p = entry.path();
+                            if p.extension().and_then(|s| s.to_str()) == Some("txt") {
+                                let stem = p.file_stem().unwrap_or_default().to_string_lossy();
+                                let ocd2_path = opencc_dir.join(format!("{}.ocd2", stem));
+                                let should_compile = if !ocd2_path.exists() {
+                                    true
+                                } else if let (Ok(m_txt), Ok(m_ocd2)) = (p.metadata(), ocd2_path.metadata()) {
+                                    m_txt.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH) >
+                                        m_ocd2.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                                } else {
+                                    false
+                                };
+                                if should_compile {
+                                    let _ = Command::new(ocd_bin)
+                                        .arg("-i").arg(&p)
+                                        .arg("-o").arg(&ocd2_path)
+                                        .arg("-f").arg("text")
+                                        .arg("-t").arg("ocd2")
+                                        .status();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // 2. 尝试执行 rime_deployer 进行真实全量编译
@@ -278,4 +313,41 @@ pub fn trigger_deploy(custom_deployer: Option<String>) -> DeployResult {
         custom_deployer,
         "重新部署指令已成功发送给输入法，配置与词库已刷新！",
     )
+}
+
+/// 在 Linux 环境下一键安装 Rime 扩展插件及 OpenCC 工具 (调起 pkexec 授权执行)
+pub fn install_linux_plugins() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let (cmd, args) = if std::path::Path::new("/usr/bin/dnf").exists() {
+            ("/usr/bin/pkexec", vec!["dnf", "install", "-y", "librime-lua", "librime-octagram", "opencc", "opencc-tools"])
+        } else if std::path::Path::new("/usr/bin/apt-get").exists() {
+            ("/usr/bin/pkexec", vec!["apt-get", "install", "-y", "librime-plugin-lua", "librime-plugin-octagram", "opencc"])
+        } else if std::path::Path::new("/usr/bin/pacman").exists() {
+            ("/usr/bin/pkexec", vec!["pacman", "-S", "--noconfirm", "librime-lua", "opencc"])
+        } else if std::path::Path::new("/usr/bin/zypper").exists() {
+            ("/usr/bin/pkexec", vec!["zypper", "install", "-y", "librime-lua", "librime-octagram", "opencc"])
+        } else {
+            return Err("未识别的 Linux 发行版包管理器，请手动在终端执行安装。".to_string());
+        };
+
+        let status = std::process::Command::new(cmd)
+            .args(&args)
+            .status()
+            .map_err(|e| format!("启动授权安装程序失败: {e}"))?;
+
+        if status.success() {
+            // 安装完成后自动重载 fcitx5
+            let _ = std::process::Command::new("busctl")
+                .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "Restart"])
+                .status();
+            Ok("安装成功！已自动重启输入法服务。".to_string())
+        } else {
+            Err(format!("安装未成功完成或用户取消授权 (退出状态: {status:?})"))
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok("当前非 Linux 系统，无需安装系统级插件。".to_string())
+    }
 }

@@ -36,6 +36,9 @@ pub struct EnvironmentStatus {
     pub available_grammar_models: Vec<GrammarModelItem>,
     pub is_lua_available: bool,
     pub is_octagram_available: bool,
+    pub is_opencc_available: bool,
+    pub linux_pkg_manager: String,
+    pub linux_install_command: String,
 }
 
 pub fn detect_weasel_paths() -> (Option<String>, Option<String>, Option<String>) {
@@ -628,7 +631,7 @@ pub fn inspect_environment() -> EnvironmentStatus {
 
     let available_grammar_models = scan_grammar_models(&user_path);
 
-    let (is_lua_available, is_octagram_available) = {
+    let (is_lua_available, is_octagram_available, is_opencc_available, linux_pkg_manager, linux_install_command) = {
         #[cfg(target_os = "linux")]
         {
             let plugin_dirs = [
@@ -639,11 +642,25 @@ pub fn inspect_environment() -> EnvironmentStatus {
             ];
             let has_lua = plugin_dirs.iter().any(|d| Path::new(d).join("librime-lua.so").exists());
             let has_octa = plugin_dirs.iter().any(|d| Path::new(d).join("librime-octagram.so").exists());
-            (has_lua, has_octa)
+            let has_opencc = Path::new("/usr/bin/opencc_dict").exists() || Path::new("/usr/local/bin/opencc_dict").exists();
+
+            let (pkg_mgr, cmd) = if Path::new("/usr/bin/dnf").exists() {
+                ("dnf".to_string(), "sudo dnf install -y librime-lua librime-octagram opencc opencc-tools".to_string())
+            } else if Path::new("/usr/bin/apt-get").exists() || Path::new("/usr/bin/apt").exists() {
+                ("apt".to_string(), "sudo apt update && sudo apt install -y librime-plugin-lua librime-plugin-octagram opencc".to_string())
+            } else if Path::new("/usr/bin/pacman").exists() {
+                ("pacman".to_string(), "sudo pacman -S --noconfirm librime-lua opencc".to_string())
+            } else if Path::new("/usr/bin/zypper").exists() {
+                ("zypper".to_string(), "sudo zypper install -y librime-lua librime-octagram opencc".to_string())
+            } else {
+                ("unknown".to_string(), "sudo dnf install -y librime-lua librime-octagram opencc opencc-tools".to_string())
+            };
+
+            (has_lua, has_octa, has_opencc, pkg_mgr, cmd)
         }
         #[cfg(not(target_os = "linux"))]
         {
-            (true, true)
+            (true, true, true, String::new(), String::new())
         }
     };
 
@@ -668,6 +685,9 @@ pub fn inspect_environment() -> EnvironmentStatus {
         available_grammar_models,
         is_lua_available,
         is_octagram_available,
+        is_opencc_available,
+        linux_pkg_manager,
+        linux_install_command,
     }
 }
 
