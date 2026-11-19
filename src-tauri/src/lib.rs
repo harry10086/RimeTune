@@ -1206,4 +1206,68 @@ switches:
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_double_pinyin_ice_family_and_switcher_hotkeys() {
+        let temp_dir = std::env::temp_dir().join(format!("rimetune_test_dp_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let u_str = temp_dir.to_str().unwrap();
+
+        // 模拟用户目录下安装了 rime_ice 和 double_pinyin_mspy
+        std::fs::write(temp_dir.join("rime_ice.schema.yaml"), "schema:\n  schema_id: rime_ice\n  name: 雾凇拼音\nswitches:\n  - name: ascii_mode\n  - name: ascii_punct\n  - name: traditionalization\n  - name: emoji\n  - name: full_shape\n  - name: search_single_char\n  - name: dict_comment\n").unwrap();
+        std::fs::write(temp_dir.join("double_pinyin_mspy.schema.yaml"), "schema:\n  schema_id: double_pinyin_mspy\n  name: 微软双拼\nswitches:\n  - name: ascii_mode\n  - name: ascii_punct\n  - name: traditionalization\n  - name: emoji\n  - name: full_shape\n  - name: search_single_char\n  - name: dict_comment\n").unwrap();
+
+        let mut config = patcher::load_unified_config(u_str);
+        config.schemas = vec![
+            patcher::SchemaItem {
+                id: "double_pinyin_mspy".to_string(),
+                name: "微软双拼".to_string(),
+                enabled: true,
+                description: "".to_string(),
+                file_path: temp_dir.join("double_pinyin_mspy.schema.yaml").to_str().unwrap().to_string(),
+            },
+            patcher::SchemaItem {
+                id: "rime_ice".to_string(),
+                name: "雾凇拼音".to_string(),
+                enabled: true,
+                description: "".to_string(),
+                file_path: temp_dir.join("rime_ice.schema.yaml").to_str().unwrap().to_string(),
+            },
+        ];
+
+        // 开启万象语言模型与词典释义，配置 switcher_hotkeys 包含 Control+Shift+grave
+        config.rime_ice_toggles.enable_grammar = true;
+        config.rime_ice_toggles.grammar_model = "wanxiang-lts-zh-hans".to_string();
+        config.rime_ice_toggles.dict_comment_chinese_to_english = true;
+        config.key_bindings.switcher_hotkeys = vec!["Control+Shift+grave".to_string(), "F4".to_string()];
+        config.key_bindings.shift_l = "commit_text".to_string();
+        config.key_bindings.shift_r = "inline_ascii".to_string();
+
+        let res = patcher::save_unified_config(u_str, config.clone());
+        assert!(res.is_ok(), "save_unified_config failed: {:?}", res);
+
+        // 1. 验证 double_pinyin_mspy.custom.yaml 成功生成且完整包含万象语言模型与词典释义
+        let dp_custom = std::fs::read_to_string(temp_dir.join("double_pinyin_mspy.custom.yaml")).expect("double_pinyin_mspy.custom.yaml should exist");
+        assert!(dp_custom.contains("grammar/language"), "double_pinyin_mspy must contain grammar/language");
+        assert!(dp_custom.contains("wanxiang-lts-zh-hans"), "double_pinyin_mspy must configure wanxiang model");
+        assert!(dp_custom.contains("dict_comment_filter"), "double_pinyin_mspy must contain dict_comment_filter");
+
+        // 2. 验证 default.custom.yaml 中 Control+Shift+grave 自动补全了 Linux/X11 的 asciitilde 键位别名
+        let default_custom = std::fs::read_to_string(temp_dir.join("default.custom.yaml")).unwrap();
+        assert!(default_custom.contains("Control+asciitilde"), "default.custom.yaml must contain Control+asciitilde for Linux keysym compatibility");
+        assert!(default_custom.contains("Control+Shift+asciitilde"), "default.custom.yaml must contain Control+Shift+asciitilde");
+        assert!(default_custom.contains("Shift_L: commit_text"), "default.custom.yaml must contain Shift_L");
+        assert!(default_custom.contains("Shift_R: inline_ascii"), "default.custom.yaml must contain Shift_R");
+
+        // 3. 验证再次 load_unified_config 时能无缝反读，且内部 asciitilde 别名不污染 UI 状态
+        let reloaded = patcher::load_unified_config(u_str);
+        assert!(reloaded.rime_ice_toggles.enable_grammar);
+        assert_eq!(reloaded.rime_ice_toggles.grammar_model, "wanxiang-lts-zh-hans");
+        assert!(reloaded.key_bindings.switcher_hotkeys.contains(&"Control+Shift+grave".to_string()));
+        assert!(!reloaded.key_bindings.switcher_hotkeys.contains(&"Control+asciitilde".to_string()));
+        assert_eq!(reloaded.key_bindings.shift_l, "commit_text");
+        assert_eq!(reloaded.key_bindings.shift_r, "inline_ascii");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

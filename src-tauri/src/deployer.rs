@@ -160,6 +160,19 @@ pub fn run_weasel_command(
 
         // Fcitx5 环境：通知部署并彻底重启 Fcitx5 服务以清空旧会话并使编译后的新配置即刻生效
         if target_is_fcitx5 {
+            // 自动检查并解除 Fcitx5 顶层对 Shift_L 的快捷键劫持 (AltTriggerKeys)，让 Rime 的 ascii_composer 完全接管左右 Shift 动作
+            if let Some(home) = std::env::var_os("HOME") {
+                let fcitx_cfg_path = std::path::PathBuf::from(home).join(".config/fcitx5/config");
+                if fcitx_cfg_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&fcitx_cfg_path) {
+                        if content.contains("0=Shift_L") {
+                            let updated = content.replace("0=Shift_L", "# 0=Shift_L");
+                            let _ = std::fs::write(&fcitx_cfg_path, updated);
+                        }
+                    }
+                }
+            }
+
             // 1. 通过 D-Bus 接口通知 Fcitx5-Rime 执行部署指令
             let _ = Command::new("busctl")
                 .args(["call", "--user", "org.fcitx.Fcitx5", "/controller", "org.fcitx.Fcitx.Controller1", "SetConfig", "sv", "fcitx://config/addon/rime/deploy", "s", ""])

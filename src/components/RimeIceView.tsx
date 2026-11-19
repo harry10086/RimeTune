@@ -99,10 +99,14 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
     }
   }, [validSchemas]);
 
-  const isIce = selectedSchemaId === 'rime_ice';
   const isFrost = selectedSchemaId.includes('frost');
   const isMint = selectedSchemaId.includes('mint');
   const isWanxiang = selectedSchemaId.includes('wanxiang');
+  const isIce = !isFrost && !isMint && !isWanxiang && (
+    selectedSchemaId === 'rime_ice' ||
+    selectedSchemaId.startsWith('double_pinyin') ||
+    selectedSchemaId.includes('double_pinyin')
+  );
   const isNativeBasic = !isIce && !isFrost && !isMint && !isWanxiang;
   const [features, setFeatures] = useState<SchemeFeatureItem[]>([]);
   const [featuresLoading, setFeaturesLoading] = useState<boolean>(false);
@@ -264,8 +268,8 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
       });
     }
 
-    // 若当前为雾凇拼音，联动更新对应 toggles 状态
-    if (selectedSchemaId === 'rime_ice') {
+    // 若当前为雾凇方案（含双拼），联动更新对应 toggles 状态
+    if (isIce) {
       if (tableName.includes('41448')) {
         updateToggles({ dict_large_char: enabled });
       } else if (tableName.includes('tencent')) {
@@ -621,7 +625,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
             正在动态解析该方案的主词库入口与挂载清单...
           </div>
         ) : mountsInfo && mountsInfo.mounted_tables.length > 0 ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px', marginBottom: selectedSchemaId === 'rime_ice' ? '20px' : '0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px', marginBottom: isIce ? '20px' : '0' }}>
             {mountsInfo.mounted_tables.map((table) => (
               <div
                 key={table.name}
@@ -1354,8 +1358,8 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
         </div>
       </div>
 
-      {/* 词典释义滤镜 (Lua) - 仅雾凇拼音定制版可用 */}
-      {selectedSchemaId === 'rime_ice' && (
+      {/* 词典释义滤镜 (Lua) - 雾凇拼音全拼及双拼方案可用 */}
+      {isIce && (
         <div className="glass-panel" style={{ padding: '24px', borderRadius: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '17px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '8px' }}>
             <BookMarked size={20} color="#34d399" />
