@@ -4510,7 +4510,13 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     // A. 雾凇拼音 (rime_ice 与所有双拼变体方案)
     let is_ice_family = |id: &str| -> bool {
         id == "rime_ice" ||
-        (id.starts_with("double_pinyin") && !id.starts_with("rime_frost_") && !id.starts_with("rime_mint_"))
+        (
+            !id.starts_with("rime_frost_") && !id.starts_with("rime_mint_") && !id.starts_with("wanxiang")
+            && (
+                id.starts_with("double_pinyin") || id.contains("double_pinyin")
+                || id.contains("flypy") || id.contains("mspy") || id.contains("ziguang") || id.contains("sogou") || id.contains("jiajia")
+            )
+        )
     };
     let ice_schema_path = u_path.join("rime_ice.schema.yaml");
     let is_ice_active = ice_schema_path.exists() || config.schemas.iter().any(|s| s.enabled && is_ice_family(&s.id));

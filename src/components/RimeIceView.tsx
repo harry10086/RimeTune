@@ -102,10 +102,18 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
   const isFrost = selectedSchemaId.includes('frost');
   const isMint = selectedSchemaId.includes('mint');
   const isWanxiang = selectedSchemaId.includes('wanxiang');
+  const isDoublePinyin = (
+    selectedSchemaId.startsWith('double_pinyin') ||
+    selectedSchemaId.includes('double_pinyin') ||
+    selectedSchemaId.includes('flypy') ||
+    selectedSchemaId.includes('mspy') ||
+    selectedSchemaId.includes('ziguang') ||
+    selectedSchemaId.includes('sogou') ||
+    selectedSchemaId.includes('jiajia')
+  );
   const isIce = !isFrost && !isMint && !isWanxiang && (
     selectedSchemaId === 'rime_ice' ||
-    selectedSchemaId.startsWith('double_pinyin') ||
-    selectedSchemaId.includes('double_pinyin')
+    isDoublePinyin
   );
   const isNativeBasic = !isIce && !isFrost && !isMint && !isWanxiang;
   const [features, setFeatures] = useState<SchemeFeatureItem[]>([]);
@@ -1219,7 +1227,22 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
           勾选容易读错或混淆的发音规则，自动生成补丁（写入 <span className="mono" style={{ color: '#38bdf8' }}>{selectedSchemaId}.custom.yaml</span>）。
         </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+        {isDoublePinyin ? (
+          <div style={{ padding: '20px 22px', borderRadius: '12px', backgroundColor: 'var(--bg-tertiary)', border: '1px dashed var(--border)', display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ padding: '12px', borderRadius: '10px', backgroundColor: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', flexShrink: 0 }}>
+              <Sparkles size={24} />
+            </div>
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 700, color: '#38bdf8', marginBottom: '4px' }}>
+                双拼方案已自动免除全拼模糊音运算
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--text-dim)', lineHeight: '1.6' }}>
+                当前选中的方案为双拼方案（{selectedSchemaId}），采用固定的声韵母双键位映射编码。全拼拼音运算与模糊音（平翘舌、前后鼻音运算规则）仅适用于全拼。为保证双拼输入精准无重码干扰，全拼模糊音规则已自动处于关闭状态。
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
           {/* 平翘舌 */}
           <div style={{ padding: '16px', borderRadius: '10px', backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
             <div style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', marginBottom: '10px' }}>平翘舌互换</div>
@@ -1356,6 +1379,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* 词典释义滤镜 (Lua) - 雾凇拼音全拼及双拼方案可用 */}
