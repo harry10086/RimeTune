@@ -1270,4 +1270,95 @@ switches:
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_dict_mount_toggle_and_custom_dict_persistence() {
+        let temp_dir = std::env::temp_dir().join(format!("rimetune_dict_sync_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let u_str = temp_dir.to_str().unwrap();
+
+        // 准备初始 rime_ice.dict.yaml
+        let initial_dict = r#"# Rime dictionary
+---
+name: rime_ice
+version: "0.1"
+import_tables:
+  - cn_dicts/8105
+  # - cn_dicts/41448
+  - cn_dicts/base
+  - cn_dicts/ext
+  - cn_dicts/tencent
+  - cn_dicts/others
+...
+"#;
+        std::fs::write(temp_dir.join("rime_ice.dict.yaml"), initial_dict).unwrap();
+
+        // 1. 验证初始状态探测
+        let mut cfg = patcher::load_unified_config(u_str);
+        assert!(!cfg.rime_ice_toggles.dict_large_char, "41448 should initially be disabled");
+        assert!(cfg.rime_ice_toggles.dict_base, "base should initially be enabled");
+        assert!(cfg.rime_ice_toggles.dict_ext, "ext should initially be enabled");
+        assert!(cfg.rime_ice_toggles.dict_tencent, "tencent should initially be enabled");
+        assert!(cfg.rime_ice_toggles.dict_others, "others should initially be enabled");
+
+        // 2. 关闭 cn_dicts/ext
+        let mounts = patcher::toggle_dict_mount_table(u_str, "rime_ice", "cn_dicts/ext", false).unwrap();
+        let ext_item = mounts.mounted_tables.iter().find(|t| t.name == "cn_dicts/ext").unwrap();
+        assert!(!ext_item.enabled, "ext must be reported as disabled in mounts_info");
+
+        // 验证探测结果即刻反映 ext 为 false
+        let cfg_after_toggle = patcher::load_unified_config(u_str);
+        assert!(!cfg_after_toggle.rime_ice_toggles.dict_ext, "dict_ext must be detected as false from rime_ice.dict.yaml");
+
+        // 3. 模拟导入自定义词库并保存部署
+        cfg.schemas = vec![patcher::SchemaItem {
+            id: "rime_ice".to_string(),
+            name: "雾凇拼音".to_string(),
+            description: "雾凇拼音".to_string(),
+            file_path: temp_dir.join("rime_ice.schema.yaml").to_string_lossy().to_string(),
+            enabled: true,
+        }];
+        cfg.rime_ice_toggles.dict_ext = false;
+        let custom_dir = temp_dir.join("custom_dicts");
+        std::fs::create_dir_all(&custom_dir).unwrap();
+        std::fs::write(custom_dir.join("test_dict.dict.yaml"), "# custom dict").unwrap();
+
+        cfg.custom_dicts.push(patcher::CustomDictItem {
+            name: "custom_dicts/test_dict".to_string(),
+            file_name: "test_dict.dict.yaml".to_string(),
+            full_path: custom_dir.join("test_dict.dict.yaml").to_string_lossy().to_string(),
+            description: "测试自定义词库".to_string(),
+            enabled: true,
+            size_kb: 1.0,
+        });
+
+        patcher::save_unified_config(u_str, cfg.clone()).unwrap();
+
+        // 4. 验证 rime_ice.extended.dict.yaml 的生成内容
+        let ext_dict_content = std::fs::read_to_string(temp_dir.join("rime_ice.extended.dict.yaml")).unwrap();
+        assert!(ext_dict_content.contains("cn_dicts/8105"), "extended dict must contain 8105");
+        assert!(ext_dict_content.contains("cn_dicts/base"), "extended dict must contain base");
+        assert!(!ext_dict_content.contains("cn_dicts/ext"), "extended dict must NOT contain ext because it was disabled");
+        assert!(ext_dict_content.contains("custom_dicts/test_dict"), "extended dict must contain custom dict");
+
+        // 5. 验证保存后全量重读时：ext 保持关闭，custom dict 保持开启
+        let reloaded_cfg = patcher::load_unified_config(u_str);
+        assert!(!reloaded_cfg.rime_ice_toggles.dict_ext, "ext must remain disabled after saving and reloading");
+        assert!(reloaded_cfg.rime_ice_toggles.dict_base, "base must remain enabled");
+        let reloaded_custom = reloaded_cfg.custom_dicts.iter().find(|d| d.name == "custom_dicts/test_dict").unwrap();
+        assert!(reloaded_custom.enabled, "custom dict must remain enabled");
+
+        // 6. 在 extended 存在的情况下，通过 toggle_dict_mount_table 重新启用 ext
+        let mounts_re_enabled = patcher::toggle_dict_mount_table(u_str, "rime_ice", "cn_dicts/ext", true).unwrap();
+        let re_ext = mounts_re_enabled.mounted_tables.iter().find(|t| t.name == "cn_dicts/ext").unwrap();
+        assert!(re_ext.enabled, "ext must be re-enabled");
+
+        let ext_dict_synced = std::fs::read_to_string(temp_dir.join("rime_ice.extended.dict.yaml")).unwrap();
+        assert!(ext_dict_synced.contains("cn_dicts/ext"), "extended dict must have ext restored");
+
+        let rime_ice_synced = std::fs::read_to_string(temp_dir.join("rime_ice.dict.yaml")).unwrap();
+        assert!(rime_ice_synced.contains("- cn_dicts/ext"), "rime_ice.dict.yaml must have - cn_dicts/ext restored");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

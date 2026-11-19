@@ -1926,6 +1926,31 @@ pub fn scan_custom_dicts(user_dir: &str) -> Vec<CustomDictItem> {
                 }
             }
         }
+    } else {
+        // 如果 extended 暂未生成，扫描主词典 rime_ice.dict.yaml 中的启用挂载项
+        let main_dict = u_path.join("rime_ice.dict.yaml");
+        if main_dict.exists() {
+            if let Ok(content) = fs::read_to_string(&main_dict) {
+                let mut in_import = false;
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed == "import_tables:" {
+                        in_import = true;
+                        continue;
+                    }
+                    if in_import {
+                        if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
+                            break;
+                        }
+                        if trimmed.starts_with("- ") || trimmed.starts_with('-') {
+                            let clean = trimmed.trim_start_matches('-').trim();
+                            let table_name = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
+                            mounted_names.insert(table_name.to_string());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // 1. 扫描 custom_dicts/ 目录
@@ -2295,18 +2320,16 @@ pub fn detect_schema_dict_mounts(user_dir: &str, schema_id: &str) -> SchemaDictM
     }
 }
 
-pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str, enable: bool) -> Result<SchemaDictMountsInfo, String> {
-    let mounts_info = detect_schema_dict_mounts(user_dir, schema_id);
-    let dict_path = Path::new(&mounts_info.primary_dict_path);
-
+pub fn toggle_table_in_file(dict_path: &Path, table_name: &str, enable: bool) -> Result<bool, String> {
     if !dict_path.exists() {
-        return Err(format!("主词库文件不存在: {}", mounts_info.primary_dict_file));
+        return Ok(false);
     }
 
     let content = fs::read_to_string(dict_path).map_err(|e| format!("读取词库文件失败: {}", e))?;
     let mut new_lines = Vec::new();
     let mut in_import_tables = false;
     let mut modified = false;
+    let mut found = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -2319,6 +2342,11 @@ pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str
 
         if in_import_tables {
             if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
+                if enable && !found {
+                    new_lines.push(format!("  - {}", table_name));
+                    modified = true;
+                    found = true;
+                }
                 in_import_tables = false;
                 new_lines.push(line.to_string());
                 continue;
@@ -2333,7 +2361,7 @@ pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str
                     if un_hash.starts_with('-') {
                         un_hash.trim_start_matches('-').trim()
                     } else {
-                        ""
+                        un_hash
                     }
                 } else {
                     ""
@@ -2343,7 +2371,7 @@ pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str
             };
 
             if is_target_line {
-                modified = true;
+                found = true;
                 if enable {
                     // 启用：移除开头的 #
                     let without_hash = line.replacen('#', "", 1);
@@ -2353,6 +2381,9 @@ pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str
                     } else {
                         format!("  - {}", trimmed_wh)
                     };
+                    if line != restored {
+                        modified = true;
+                    }
                     new_lines.push(restored);
                 } else {
                     // 禁用：在开头加 #
@@ -2360,6 +2391,7 @@ pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str
                     let commented = if trimmed_item.starts_with('#') {
                         line.to_string()
                     } else {
+                        modified = true;
                         format!("  # {}", trimmed_item)
                     };
                     new_lines.push(commented);
@@ -2371,21 +2403,164 @@ pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str
         new_lines.push(line.to_string());
     }
 
+    if enable && in_import_tables && !found {
+        new_lines.push(format!("  - {}", table_name));
+        modified = true;
+    }
+
     if modified {
         fs::write(dict_path, new_lines.join("\n") + "\n").map_err(|e| format!("写入词库文件失败: {}", e))?;
-        // 删除 build 目录下对应的 table.bin / reverse.bin，确保下次部署必定触发重新全量编译词典
-        let u_path = Path::new(user_dir);
-        let build_dir = u_path.join("build");
-        let dict_stem = dict_path.file_stem().and_then(|s| s.to_str()).unwrap_or("").trim_end_matches(".dict");
-        if !dict_stem.is_empty() {
-            let _ = fs::remove_file(build_dir.join(format!("{}.table.bin", dict_stem)));
-            let _ = fs::remove_file(build_dir.join(format!("{}.reverse.bin", dict_stem)));
-        }
-        let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
-        let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
-        let _ = fs::remove_file(build_dir.join("rime_ice.extended.table.bin"));
-        let _ = fs::remove_file(build_dir.join("rime_ice.extended.reverse.bin"));
     }
+
+    Ok(modified)
+}
+
+pub fn detect_dict_mount_states(u_path: &Path, schema_id: &str, toggles: &mut RimeIceToggles) {
+    let ext_dict_files = [
+        u_path.join(format!("{}.extended.dict.yaml", schema_id)),
+        u_path.join("rime_ice.extended.dict.yaml"),
+    ];
+
+    let mut parsed = false;
+
+    for ext_path in &ext_dict_files {
+        if ext_path.exists() {
+            if let Ok(c) = fs::read_to_string(ext_path) {
+                let mut in_import = false;
+                let mut has_import_section = false;
+                let mut lc = false;
+                let mut base = false;
+                let mut ext = false;
+                let mut tencent = false;
+                let mut others = false;
+
+                for line in c.lines() {
+                    let trimmed = line.trim();
+                    if trimmed == "import_tables:" {
+                        in_import = true;
+                        continue;
+                    }
+                    if in_import {
+                        if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
+                            break;
+                        }
+                        if trimmed.starts_with("- ") || trimmed.starts_with('-') {
+                            has_import_section = true;
+                            let clean = trimmed.trim_start_matches('-').trim();
+                            let tbl = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
+                            if tbl.contains("41448") { lc = true; }
+                            if tbl.ends_with("base") || tbl.contains("/base") { base = true; }
+                            if tbl.ends_with("ext") || tbl.contains("/ext") { ext = true; }
+                            if tbl.contains("tencent") { tencent = true; }
+                            if tbl.ends_with("others") || tbl.contains("/others") { others = true; }
+                        } else if trimmed.starts_with("# -") || trimmed.starts_with("#-") || trimmed.starts_with('#') {
+                            has_import_section = true;
+                        }
+                    }
+                }
+
+                if has_import_section {
+                    toggles.dict_large_char = lc;
+                    toggles.dict_base = base;
+                    toggles.dict_ext = ext;
+                    toggles.dict_tencent = tencent;
+                    toggles.dict_others = others;
+                    parsed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if !parsed {
+        let main_dict_files = [
+            u_path.join(format!("{}.dict.yaml", schema_id)),
+            u_path.join("rime_ice.dict.yaml"),
+        ];
+
+        for main_path in &main_dict_files {
+            if main_path.exists() {
+                if let Ok(c) = fs::read_to_string(main_path) {
+                    let mut in_import = false;
+                    let mut has_import_section = false;
+                    let mut lc = false;
+                    let mut base = false;
+                    let mut ext = false;
+                    let mut tencent = false;
+                    let mut others = false;
+
+                    for line in c.lines() {
+                        let trimmed = line.trim();
+                        if trimmed == "import_tables:" {
+                            in_import = true;
+                            continue;
+                        }
+                        if in_import {
+                            if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
+                                break;
+                            }
+                            if trimmed.starts_with("- ") || trimmed.starts_with('-') {
+                                has_import_section = true;
+                                let clean = trimmed.trim_start_matches('-').trim();
+                                let tbl = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
+                                if tbl.contains("41448") { lc = true; }
+                                if tbl.ends_with("base") || tbl.contains("/base") { base = true; }
+                                if tbl.ends_with("ext") || tbl.contains("/ext") { ext = true; }
+                                if tbl.contains("tencent") { tencent = true; }
+                                if tbl.ends_with("others") || tbl.contains("/others") { others = true; }
+                            } else if trimmed.starts_with("# -") || trimmed.starts_with("#-") || trimmed.starts_with('#') {
+                                has_import_section = true;
+                            }
+                        }
+                    }
+
+                    if has_import_section {
+                        toggles.dict_large_char = lc;
+                        toggles.dict_base = base;
+                        toggles.dict_ext = ext;
+                        toggles.dict_tencent = tencent;
+                        toggles.dict_others = others;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str, enable: bool) -> Result<SchemaDictMountsInfo, String> {
+    let u_path = Path::new(user_dir);
+    let mounts_info = detect_schema_dict_mounts(user_dir, schema_id);
+    let primary_dict = Path::new(&mounts_info.primary_dict_path);
+
+    if !primary_dict.exists() {
+        return Err(format!("主词库文件不存在: {}", mounts_info.primary_dict_file));
+    }
+
+    let _ = toggle_table_in_file(primary_dict, table_name, enable)?;
+
+    if schema_id == "rime_ice" || mounts_info.is_ice_extended_managed {
+        let ext_dict = u_path.join("rime_ice.extended.dict.yaml");
+        if ext_dict.exists() && ext_dict != primary_dict {
+            let _ = toggle_table_in_file(&ext_dict, table_name, enable);
+        }
+        let ice_dict = u_path.join("rime_ice.dict.yaml");
+        if ice_dict.exists() && ice_dict != primary_dict {
+            let _ = toggle_table_in_file(&ice_dict, table_name, enable);
+        }
+    }
+
+    // 删除 build 目录下对应的 table.bin / reverse.bin，确保下次部署必定触发重新全量编译词典
+    let build_dir = u_path.join("build");
+    let dict_stem = primary_dict.file_stem().and_then(|s| s.to_str()).unwrap_or("").trim_end_matches(".dict");
+    if !dict_stem.is_empty() {
+        let _ = fs::remove_file(build_dir.join(format!("{}.table.bin", dict_stem)));
+        let _ = fs::remove_file(build_dir.join(format!("{}.reverse.bin", dict_stem)));
+    }
+    let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
+    let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
+    let _ = fs::remove_file(build_dir.join("rime_ice.extended.table.bin"));
+    let _ = fs::remove_file(build_dir.join("rime_ice.extended.reverse.bin"));
 
     Ok(detect_schema_dict_mounts(user_dir, schema_id))
 }
@@ -3170,28 +3345,8 @@ pub fn get_schema_toggles_and_fuzzy(user_dir: &str, schema_id: &str) -> SchemaSt
         }
     }
 
-    // 4. 读取词典扩展清单中的子表勾选状态 (如 rime_ice.extended.dict.yaml)
-    let ext_dict_files = [
-        u_path.join(format!("{}.extended.dict.yaml", schema_id)),
-        u_path.join("rime_ice.extended.dict.yaml"),
-    ];
-    for ext_path in &ext_dict_files {
-        if ext_path.exists() {
-            if let Ok(c) = fs::read_to_string(ext_path) {
-                if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
-                    if let Some(tables) = val.get("import_tables").and_then(|t| t.as_sequence()) {
-                        let list: Vec<String> = tables.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
-                        toggles.dict_large_char = list.iter().any(|t| t.contains("41448"));
-                        toggles.dict_base = list.iter().any(|t| t.ends_with("base"));
-                        toggles.dict_ext = list.iter().any(|t| t.ends_with("ext"));
-                        toggles.dict_tencent = list.iter().any(|t| t.contains("tencent"));
-                        toggles.dict_others = list.iter().any(|t| t.ends_with("others"));
-                        break;
-                    }
-                }
-            }
-        }
-    }
+    // 4. 读取词典扩展清单与主词典中的子表勾选状态
+    detect_dict_mount_states(&u_path, schema_id, &mut toggles);
 
     // 探测英文大小写派生规则 (melt_eng)
     let melt_custom = u_path.join("melt_eng.custom.yaml");
@@ -4065,22 +4220,9 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
         }
     }
 
-    // 探测扩展词典清单 (rime_ice.extended.dict.yaml)
-    let ext_dict_path = u_path.join("rime_ice.extended.dict.yaml");
-    if ext_dict_path.exists() {
-        if let Ok(c) = fs::read_to_string(&ext_dict_path) {
-            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
-                if let Some(tables) = val.get("import_tables").and_then(|t| t.as_sequence()) {
-                    let list: Vec<String> = tables.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect();
-                    rime_ice_toggles.dict_large_char = list.iter().any(|t| t.contains("41448"));
-                    rime_ice_toggles.dict_base = list.iter().any(|t| t.ends_with("base"));
-                    rime_ice_toggles.dict_ext = list.iter().any(|t| t.ends_with("ext"));
-                    rime_ice_toggles.dict_tencent = list.iter().any(|t| t.contains("tencent"));
-                    rime_ice_toggles.dict_others = list.iter().any(|t| t.ends_with("others"));
-                }
-            }
-        }
-    }
+    // 探测扩展词典清单与主词典中的子表勾选状态
+    let target_schema = primary_schema_id.as_deref().unwrap_or("rime_ice");
+    detect_dict_mount_states(&u_path, target_schema, &mut rime_ice_toggles);
 
     // 探测英文大小写派生规则 (melt_eng)
     let melt_custom = u_path.join("melt_eng.custom.yaml");
@@ -4526,84 +4668,19 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         if !dict_path.exists() {
             return;
         }
-        if let Ok(content) = fs::read_to_string(&dict_path) {
-            let mut new_lines = Vec::new();
-            let mut in_import = false;
-            let mut modified = false;
-
-            let table_states = [
-                ("cn_dicts/41448", toggles.dict_large_char),
-                ("cn_dicts/base", toggles.dict_base),
-                ("cn_dicts/ext", toggles.dict_ext),
-                ("cn_dicts/tencent", toggles.dict_tencent),
-                ("cn_dicts/others", toggles.dict_others),
-            ];
-
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed == "import_tables:" {
-                    in_import = true;
-                    new_lines.push(line.to_string());
-                    continue;
-                }
-                if in_import {
-                    if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
-                        in_import = false;
-                        new_lines.push(line.to_string());
-                        continue;
-                    }
-
-                    let mut handled = false;
-                    for &(tbl, enabled) in &table_states {
-                        let clean = if trimmed.starts_with('-') {
-                            trimmed.trim_start_matches('-').trim()
-                        } else if trimmed.starts_with('#') {
-                            let un_hash = trimmed.trim_start_matches('#').trim();
-                            if un_hash.starts_with('-') {
-                                un_hash.trim_start_matches('-').trim()
-                            } else {
-                                ""
-                            }
-                        } else {
-                            ""
-                        };
-                        let item_name = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
-                        if item_name == tbl {
-                            handled = true;
-                            let is_commented = trimmed.starts_with('#');
-                            if enabled && is_commented {
-                                modified = true;
-                                let without_hash = line.replacen('#', "", 1);
-                                let trimmed_wh = without_hash.trim();
-                                let restored = if trimmed_wh.starts_with('-') {
-                                    format!("  {}", trimmed_wh)
-                                } else {
-                                    format!("  - {}", trimmed_wh)
-                                };
-                                new_lines.push(restored);
-                            } else if !enabled && !is_commented {
-                                modified = true;
-                                new_lines.push(format!("  # {}", trimmed));
-                            } else {
-                                new_lines.push(line.to_string());
-                            }
-                            break;
-                        }
-                    }
-                    if handled {
-                        continue;
-                    }
-                }
-                new_lines.push(line.to_string());
-            }
-
-            if modified {
-                let _ = fs::write(&dict_path, new_lines.join("\n") + "\n");
-                let build_dir = p.join("build");
-                let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
-                let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
-            }
+        let table_states = [
+            ("cn_dicts/41448", toggles.dict_large_char),
+            ("cn_dicts/base", toggles.dict_base),
+            ("cn_dicts/ext", toggles.dict_ext),
+            ("cn_dicts/tencent", toggles.dict_tencent),
+            ("cn_dicts/others", toggles.dict_others),
+        ];
+        for &(tbl, enabled) in &table_states {
+            let _ = toggle_table_in_file(&dict_path, tbl, enabled);
         }
+        let build_dir = p.join("build");
+        let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
+        let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
     };
 
     // 格式化 Octagram 上下文语言模型补丁
@@ -4680,45 +4757,46 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             ext_yaml.push_str("name: rime_ice.extended\nversion: \"1.0\"\nsort: by_weight\nuse_preset_vocabulary: true\nimport_tables:\n");
 
             let mut core_tables = Vec::new();
+            core_tables.push("cn_dicts/8105".to_string());
+            if config.rime_ice_toggles.dict_large_char { core_tables.push("cn_dicts/41448".to_string()); }
+            if config.rime_ice_toggles.dict_base { core_tables.push("cn_dicts/base".to_string()); }
+            if config.rime_ice_toggles.dict_ext { core_tables.push("cn_dicts/ext".to_string()); }
+            if config.rime_ice_toggles.dict_tencent { core_tables.push("cn_dicts/tencent".to_string()); }
+            if config.rime_ice_toggles.dict_others { core_tables.push("cn_dicts/others".to_string()); }
+
+            // 保留 rime_ice.dict.yaml 中用户挂载的其他非核心表（如搜狗细胞词库等）
             let ice_dict_path = u_path.join("rime_ice.dict.yaml");
             if ice_dict_path.exists() {
                 if let Ok(c) = fs::read_to_string(&ice_dict_path) {
-                    if let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(&c) {
-                        if let Some(tables) = v.get("import_tables").and_then(|t| t.as_sequence()) {
-                            for t in tables {
-                                if let Some(s) = t.as_str() {
-                                    let s = s.trim().to_string();
-                                    if !s.is_empty() && !core_tables.contains(&s) {
-                                        core_tables.push(s);
-                                    }
+                    let mut in_import = false;
+                    for line in c.lines() {
+                        let trimmed = line.trim();
+                        if trimmed == "import_tables:" {
+                            in_import = true;
+                            continue;
+                        }
+                        if in_import {
+                            if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
+                                break;
+                            }
+                            if trimmed.starts_with("- ") || trimmed.starts_with('-') {
+                                let clean = trimmed.trim_start_matches('-').trim();
+                                let tbl = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
+                                if !tbl.is_empty()
+                                    && !tbl.contains("8105")
+                                    && !tbl.contains("41448")
+                                    && !tbl.ends_with("base")
+                                    && !tbl.ends_with("ext")
+                                    && !tbl.contains("tencent")
+                                    && !tbl.ends_with("others")
+                                    && !core_tables.contains(&tbl.to_string())
+                                {
+                                    core_tables.push(tbl.to_string());
                                 }
                             }
                         }
                     }
                 }
-            }
-
-            if core_tables.is_empty() {
-                core_tables.push("cn_dicts/8105".to_string());
-                if config.rime_ice_toggles.dict_large_char { core_tables.push("cn_dicts/41448".to_string()); }
-                if config.rime_ice_toggles.dict_base { core_tables.push("cn_dicts/base".to_string()); }
-                if config.rime_ice_toggles.dict_ext { core_tables.push("cn_dicts/ext".to_string()); }
-                if config.rime_ice_toggles.dict_tencent { core_tables.push("cn_dicts/tencent".to_string()); }
-                if config.rime_ice_toggles.dict_others { core_tables.push("cn_dicts/others".to_string()); }
-            } else {
-                if config.rime_ice_toggles.dict_large_char && !core_tables.contains(&"cn_dicts/41448".to_string()) {
-                    if let Some(pos) = core_tables.iter().position(|x| x == "cn_dicts/8105") {
-                        core_tables.insert(pos + 1, "cn_dicts/41448".to_string());
-                    } else {
-                        core_tables.insert(0, "cn_dicts/41448".to_string());
-                    }
-                } else if !config.rime_ice_toggles.dict_large_char {
-                    core_tables.retain(|x| x != "cn_dicts/41448");
-                }
-                if !config.rime_ice_toggles.dict_base { core_tables.retain(|x| x != "cn_dicts/base"); }
-                if !config.rime_ice_toggles.dict_ext { core_tables.retain(|x| x != "cn_dicts/ext"); }
-                if !config.rime_ice_toggles.dict_tencent { core_tables.retain(|x| x != "cn_dicts/tencent"); }
-                if !config.rime_ice_toggles.dict_others { core_tables.retain(|x| x != "cn_dicts/others"); }
             }
 
             for table in &core_tables {
@@ -4733,6 +4811,8 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             let _ = fs::write(&ext_path, ext_yaml);
 
             let build_dir = u_path.join("build");
+            let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
+            let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
             let _ = fs::remove_file(build_dir.join("rime_ice.extended.table.bin"));
             let _ = fs::remove_file(build_dir.join("rime_ice.extended.reverse.bin"));
         } else {

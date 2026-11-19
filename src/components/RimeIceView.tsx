@@ -57,7 +57,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
   onFuzzyChange,
   onTogglesChange,
   onCustomDictsChange,
-  onRefresh,
+  onRefresh: _onRefresh,
 }) => {
   // 过滤内部反查专用组件（如 radical_pinyin 部件拆字、wanxiang_reverse 反查辅码）
   const validSchemas = useMemo(() => {
@@ -151,7 +151,6 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
           }
           onCustomDictsChange(current);
         }
-        if (onRefresh) await onRefresh();
       }
     } catch (err: any) {
       showNotice(`导入词库失败: ${err?.toString() || err}`);
@@ -176,7 +175,6 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
         current.push(created);
         onCustomDictsChange(current);
       }
-      if (onRefresh) await onRefresh();
       try {
         await invoke('open_file_in_editor', { path: created.full_path });
       } catch (_) {}
@@ -203,7 +201,6 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
       if (onCustomDictsChange) {
         onCustomDictsChange(customDicts.filter((d) => d.file_name !== fileName));
       }
-      if (onRefresh) await onRefresh();
     } catch (err: any) {
       showNotice(`删除词库失败: ${err?.toString() || err}`);
     }
@@ -301,9 +298,6 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
       });
       setMountsInfo(updated);
       showNotice(`${enabled ? '已启用挂载' : '已停用挂载'}: ${tableName}（请点击右上角【保存并部署】重新编译生效）`);
-      if (onRefresh) {
-        await onRefresh();
-      }
     } catch (err: any) {
       showNotice(`切换挂载状态失败: ${err?.toString() || err}`);
       invoke<SchemaDictMountsInfo>('get_schema_dict_mounts', {

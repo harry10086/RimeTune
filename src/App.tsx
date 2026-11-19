@@ -780,9 +780,9 @@ export function App() {
                   userDir={env?.rime_user_dir}
                   activeSchemaId={env?.active_schema_id}
                   availableGrammarModels={env?.available_grammar_models}
-                  onFuzzyChange={(newFuzzy) => setConfig({ ...config, fuzzy_pinyin: newFuzzy })}
-                  onTogglesChange={(newToggles) => setConfig({ ...config, rime_ice_toggles: newToggles })}
-                  onCustomDictsChange={(newCustomDicts) => setConfig({ ...config, custom_dicts: newCustomDicts })}
+                  onFuzzyChange={(newFuzzy) => setConfig((prev) => prev ? { ...prev, fuzzy_pinyin: newFuzzy } : prev)}
+                  onTogglesChange={(newToggles) => setConfig((prev) => prev ? { ...prev, rime_ice_toggles: newToggles } : prev)}
+                  onCustomDictsChange={(newCustomDicts) => setConfig((prev) => prev ? { ...prev, custom_dicts: newCustomDicts } : prev)}
                   onRefresh={async () => {
                     if (env?.rime_user_dir) {
                       try {
@@ -800,8 +800,8 @@ export function App() {
                 <KeysView
                   keyBindings={config.key_bindings}
                   schemas={config.schemas}
-                  onKeyBindingsChange={(newKb) => setConfig({ ...config, key_bindings: newKb })}
-                  onSchemasChange={(newSchemas) => setConfig({ ...config, schemas: newSchemas })}
+                  onKeyBindingsChange={(newKb) => setConfig((prev) => prev ? { ...prev, key_bindings: newKb } : prev)}
+                  onSchemasChange={(newSchemas) => setConfig((prev) => prev ? { ...prev, schemas: newSchemas } : prev)}
                 />
               )}
 
@@ -826,7 +826,7 @@ export function App() {
                 <AppRulesView
                   appOptions={config.app_options}
                   env={env}
-                  onChange={(newOptions) => setConfig({ ...config, app_options: newOptions })}
+                  onChange={(newOptions) => setConfig((prev) => prev ? { ...prev, app_options: newOptions } : prev)}
                 />
               )}
 
