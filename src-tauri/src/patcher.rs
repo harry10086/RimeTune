@@ -3350,7 +3350,6 @@ fn detect_page_keys_from_patch(patch: &serde_yaml::Value) -> Option<Vec<String>>
                     .and_then(|x| x.as_str())
                     .unwrap_or("");
                 if accept == "comma" || accept == "period" || accept == "minus" || accept == "equal" || accept == "bracketleft" || accept == "bracketright" {
-                    found_bindings = true;
                     if send == "Page_Up" || send == "Page_Down" {
                         if accept == "comma" || accept == "period" {
                             has_cp = true;
@@ -3369,6 +3368,7 @@ fn detect_page_keys_from_patch(patch: &serde_yaml::Value) -> Option<Vec<String>>
         for (k, v) in map {
             let k_str = k.as_str().unwrap_or("");
             if k_str == "key_binder/bindings/+" || k_str == "key_binder/bindings" {
+                found_bindings = true;
                 if let Some(seq) = v.as_sequence() {
                     inspect_seq(seq);
                 }
@@ -3377,6 +3377,7 @@ fn detect_page_keys_from_patch(patch: &serde_yaml::Value) -> Option<Vec<String>>
                     for (sub_k, sub_v) in km {
                         let sub_str = sub_k.as_str().unwrap_or("");
                         if sub_str == "bindings" || sub_str == "bindings/+" {
+                            found_bindings = true;
                             if let Some(seq) = sub_v.as_sequence() {
                                 inspect_seq(seq);
                             }
@@ -4394,27 +4395,26 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         page_keys_yaml_block.push_str("  \"key_binder/select_first_character\": \"bracketleft\"\n");
         page_keys_yaml_block.push_str("  \"key_binder/select_last_character\": \"bracketright\"\n");
     }
-    page_keys_yaml_block.push_str("  \"key_binder/bindings/+\":\n");
+    page_keys_yaml_block.push_str("  \"key_binder/bindings\":\n");
+    page_keys_yaml_block.push_str("    - { when: composing, accept: Shift+Tab, send: Shift+Left }\n");
+    page_keys_yaml_block.push_str("    - { when: composing, accept: Tab, send: Shift+Right }\n");
+    page_keys_yaml_block.push_str("    - { when: composing, accept: Alt+Left, send: Shift+Left }\n");
+    page_keys_yaml_block.push_str("    - { when: composing, accept: Alt+Right, send: Shift+Right }\n");
+    page_keys_yaml_block.push_str("    - { when: always, toggle: ascii_punct, accept: \"Control+Shift+3\" }\n");
+    page_keys_yaml_block.push_str("    - { when: always, toggle: ascii_punct, accept: \"Control+Shift+numbersign\" }\n");
+    page_keys_yaml_block.push_str("    - { when: always, toggle: traditionalization, accept: \"Control+Shift+4\" }\n");
+    page_keys_yaml_block.push_str("    - { when: always, toggle: traditionalization, accept: \"Control+Shift+dollar\" }\n");
     if config.key_bindings.page_up_down_keys.contains(&"comma_period".to_string()) {
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: comma, send: Page_Up }\n");
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: period, send: Page_Down }\n");
-    } else {
-        page_keys_yaml_block.push_str("    - { when: has_menu, accept: comma, send: comma }\n");
-        page_keys_yaml_block.push_str("    - { when: has_menu, accept: period, send: period }\n");
     }
     if config.key_bindings.page_up_down_keys.contains(&"minus_equal".to_string()) {
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: minus, send: Page_Up }\n");
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: equal, send: Page_Down }\n");
-    } else {
-        page_keys_yaml_block.push_str("    - { when: has_menu, accept: minus, send: minus }\n");
-        page_keys_yaml_block.push_str("    - { when: has_menu, accept: equal, send: equal }\n");
     }
     if has_bracket {
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketleft, send: Page_Up }\n");
         page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketright, send: Page_Down }\n");
-    } else {
-        page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketleft, send: bracketleft }\n");
-        page_keys_yaml_block.push_str("    - { when: has_menu, accept: bracketright, send: bracketright }\n");
     }
 
     let build_schema_bindings_block = |extra_bindings: &[(&str, &str, &str)]| -> String {
@@ -4428,30 +4428,21 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             res.push_str("  \"key_binder/select_first_character\": \"bracketleft\"\n");
             res.push_str("  \"key_binder/select_last_character\": \"bracketright\"\n");
         }
-        res.push_str("  \"key_binder/bindings/+\":\n");
+        res.push_str("  \"key_binder/bindings\":\n");
+        for (when, accept, toggle) in extra_bindings {
+            res.push_str(&format!("    - {{ when: {}, accept: \"{}\", toggle: {} }}\n", when, accept, toggle));
+        }
         if config.key_bindings.page_up_down_keys.contains(&"comma_period".to_string()) {
             res.push_str("    - { when: has_menu, accept: comma, send: Page_Up }\n");
             res.push_str("    - { when: has_menu, accept: period, send: Page_Down }\n");
-        } else {
-            res.push_str("    - { when: has_menu, accept: comma, send: comma }\n");
-            res.push_str("    - { when: has_menu, accept: period, send: period }\n");
         }
         if config.key_bindings.page_up_down_keys.contains(&"minus_equal".to_string()) {
             res.push_str("    - { when: has_menu, accept: minus, send: Page_Up }\n");
             res.push_str("    - { when: has_menu, accept: equal, send: Page_Down }\n");
-        } else {
-            res.push_str("    - { when: has_menu, accept: minus, send: minus }\n");
-            res.push_str("    - { when: has_menu, accept: equal, send: equal }\n");
         }
         if has_bracket {
             res.push_str("    - { when: has_menu, accept: bracketleft, send: Page_Up }\n");
             res.push_str("    - { when: has_menu, accept: bracketright, send: Page_Down }\n");
-        } else {
-            res.push_str("    - { when: has_menu, accept: bracketleft, send: bracketleft }\n");
-            res.push_str("    - { when: has_menu, accept: bracketright, send: bracketright }\n");
-        }
-        for (when, accept, toggle) in extra_bindings {
-            res.push_str(&format!("    - {{ when: {}, accept: \"{}\", toggle: {} }}\n", when, accept, toggle));
         }
         res
     };

@@ -366,8 +366,12 @@ export function App() {
     }
   };
 
-  // 单独触发静默部署
+  // 单独触发静默部署（默认自动关联最新配置保存，防止未存草稿被部署回滚覆盖）
   const handleDeployOnly = async () => {
+    if (config) {
+      await handleSaveAndDeploy(true);
+      return;
+    }
     if (!env || saving || deploying) return;
     setDeploying(true);
     try {
