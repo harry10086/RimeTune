@@ -191,6 +191,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
     if (!onCustomDictsChange) return;
     const updated = customDicts.map((d) => (d.name === name ? { ...d, enabled } : d));
     onCustomDictsChange(updated);
+    showNotice(`已${enabled ? '启用' : '停用'}外挂词库「${name}」，请点击右上角【保存并部署】生效`);
   };
 
   const handleDeleteCustomDict = async (fileName: string) => {
@@ -280,6 +281,8 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
     if (isIce) {
       if (tableName.includes('41448')) {
         updateToggles({ dict_large_char: enabled });
+      } else if (tableName.endsWith('base') || tableName.includes('base')) {
+        updateToggles({ dict_base: enabled });
       } else if (tableName.includes('tencent')) {
         updateToggles({ dict_tencent: enabled });
       } else if (tableName.endsWith('ext')) {
@@ -297,7 +300,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
         enabled,
       });
       setMountsInfo(updated);
-      showNotice(`${enabled ? '已开启挂载' : '已停用挂载'}: ${tableName}`);
+      showNotice(`${enabled ? '已启用挂载' : '已停用挂载'}: ${tableName}（请点击右上角【保存并部署】重新编译生效）`);
       if (onRefresh) {
         await onRefresh();
       }
@@ -1488,8 +1491,10 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
                 <Languages size={18} />
               </div>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)' }}>候选词旁显示拼音 (注音提示)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                    候选词旁显示拼音 (注音提示)
+                  </span>
                   <span
                     style={{
                       fontSize: '11px',
@@ -1498,6 +1503,9 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
                       borderRadius: '4px',
                       backgroundColor: toggles.spelling_hints ? 'rgba(56, 189, 248, 0.2)' : 'rgba(239, 68, 68, 0.15)',
                       color: toggles.spelling_hints ? '#38bdf8' : '#f87171',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                      display: 'inline-block',
                     }}
                   >
                     {toggles.spelling_hints ? '已开启' : '已关闭'}
@@ -1510,6 +1518,9 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
                       borderRadius: '4px',
                       backgroundColor: 'rgba(251, 191, 36, 0.12)',
                       color: '#fbbf24',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                      display: 'inline-block',
                     }}
                   >
                     与中英文释义互斥
@@ -2039,11 +2050,12 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
                       if (checked && (!defaultModel || defaultModel.trim() === '')) {
                         defaultModel = availableGrammarModels[0]?.name || (isWanxiang ? 'wanxiang-lts-zh-hans' : 'zh-hans-t-essay-bgw');
                       }
+                      const isWx = isWanxiang || (defaultModel && defaultModel.includes('wanxiang'));
                       updateToggles({
                         enable_grammar: checked,
                         grammar_model: defaultModel,
-                        grammar_collocation_max_length: toggles.grammar_collocation_max_length || (isWanxiang ? 6 : 5),
-                        grammar_collocation_min_length: toggles.grammar_collocation_min_length || 2,
+                        grammar_collocation_max_length: toggles.grammar_collocation_max_length || (isWx ? 6 : 5),
+                        grammar_collocation_min_length: toggles.grammar_collocation_min_length || (isWx ? 3 : 2),
                       });
                     }}
                   />
@@ -2164,7 +2176,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
                     }}
                   >
                     <span>
-                      💡 万象拼音官方针对词库加权进行了精密调校，搭配 <code>wanxiang-lts-zh-hans.gram</code> 可获得极佳的长句联想体验。修改后请点击右上角【保存并部署】。
+                      💡 万象拼音官方针对词库加权进行了精密调校（已预设科学惩罚参数与 8 候选词权衡），搭配 <code>wanxiang-lts-zh-hans.gram</code> 可获得极佳的长句联想体验。修改后请点击右上角【保存并部署】。
                     </span>
                     {userDir && (
                       <button

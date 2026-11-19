@@ -745,37 +745,17 @@ export const KeysView: React.FC<KeysViewProps> = ({
                         🌟 首选默认方案
                       </span>
                     ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            padding: '1px 7px',
-                            borderRadius: '4px',
-                            backgroundColor: 'var(--bg-elevated)',
-                            color: 'var(--text-muted)',
-                          }}
-                        >
-                          备选 #{idx + 1}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setAsPrimarySchema(s.id)}
-                          style={{
-                            fontSize: '11px',
-                            padding: '1px 8px',
-                            borderRadius: '4px',
-                            backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                            color: '#38bdf8',
-                            border: '1px solid rgba(56, 189, 248, 0.3)',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            lineHeight: 1.4,
-                          }}
-                          title="一键将该方案提升为 #1 默认首选方案"
-                        >
-                          设为首选
-                        </button>
-                      </div>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          padding: '1px 7px',
+                          borderRadius: '4px',
+                          backgroundColor: 'var(--bg-elevated)',
+                          color: 'var(--text-muted)',
+                        }}
+                      >
+                        备选 #{idx + 1}
+                      </span>
                     )}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
@@ -784,14 +764,39 @@ export const KeysView: React.FC<KeysViewProps> = ({
                 </div>
               </div>
 
-              <label className="toggle-switch" title="关闭后将从当前输入方案选单中移除">
-                <input
-                  type="checkbox"
-                  checked={s.enabled}
-                  onChange={() => toggleSchema(s.id)}
-                />
-                <span className="slider"></span>
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                {idx > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAsPrimarySchema(s.id)}
+                    style={{
+                      fontSize: '12px',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                      color: '#38bdf8',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      transition: 'all 0.2s',
+                    }}
+                    title="一键将该方案提升为 #1 默认首选方案"
+                  >
+                    设为默认方案
+                  </button>
+                )}
+                <label className="toggle-switch" title="关闭后将从当前输入方案选单中移除">
+                  <input
+                    type="checkbox"
+                    checked={s.enabled}
+                    onChange={() => toggleSchema(s.id)}
+                  />
+                  <span className="slider"></span>
+                </label>
+              </div>
             </div>
           ))}
 

@@ -2373,6 +2373,18 @@ pub fn toggle_dict_mount_table(user_dir: &str, schema_id: &str, table_name: &str
 
     if modified {
         fs::write(dict_path, new_lines.join("\n") + "\n").map_err(|e| format!("写入词库文件失败: {}", e))?;
+        // 删除 build 目录下对应的 table.bin / reverse.bin，确保下次部署必定触发重新全量编译词典
+        let u_path = Path::new(user_dir);
+        let build_dir = u_path.join("build");
+        let dict_stem = dict_path.file_stem().and_then(|s| s.to_str()).unwrap_or("").trim_end_matches(".dict");
+        if !dict_stem.is_empty() {
+            let _ = fs::remove_file(build_dir.join(format!("{}.table.bin", dict_stem)));
+            let _ = fs::remove_file(build_dir.join(format!("{}.reverse.bin", dict_stem)));
+        }
+        let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
+        let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
+        let _ = fs::remove_file(build_dir.join("rime_ice.extended.table.bin"));
+        let _ = fs::remove_file(build_dir.join("rime_ice.extended.reverse.bin"));
     }
 
     Ok(detect_schema_dict_mounts(user_dir, schema_id))
@@ -4507,6 +4519,140 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         }
     };
 
+    // 同步 rime_ice.dict.yaml 中的词库与字表挂载项
+    let sync_rime_ice_dict_tables = |u_dir: &str, toggles: &RimeIceToggles| {
+        let p = Path::new(u_dir);
+        let dict_path = p.join("rime_ice.dict.yaml");
+        if !dict_path.exists() {
+            return;
+        }
+        if let Ok(content) = fs::read_to_string(&dict_path) {
+            let mut new_lines = Vec::new();
+            let mut in_import = false;
+            let mut modified = false;
+
+            let table_states = [
+                ("cn_dicts/41448", toggles.dict_large_char),
+                ("cn_dicts/base", toggles.dict_base),
+                ("cn_dicts/ext", toggles.dict_ext),
+                ("cn_dicts/tencent", toggles.dict_tencent),
+                ("cn_dicts/others", toggles.dict_others),
+            ];
+
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed == "import_tables:" {
+                    in_import = true;
+                    new_lines.push(line.to_string());
+                    continue;
+                }
+                if in_import {
+                    if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
+                        in_import = false;
+                        new_lines.push(line.to_string());
+                        continue;
+                    }
+
+                    let mut handled = false;
+                    for &(tbl, enabled) in &table_states {
+                        let clean = if trimmed.starts_with('-') {
+                            trimmed.trim_start_matches('-').trim()
+                        } else if trimmed.starts_with('#') {
+                            let un_hash = trimmed.trim_start_matches('#').trim();
+                            if un_hash.starts_with('-') {
+                                un_hash.trim_start_matches('-').trim()
+                            } else {
+                                ""
+                            }
+                        } else {
+                            ""
+                        };
+                        let item_name = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
+                        if item_name == tbl {
+                            handled = true;
+                            let is_commented = trimmed.starts_with('#');
+                            if enabled && is_commented {
+                                modified = true;
+                                let without_hash = line.replacen('#', "", 1);
+                                let trimmed_wh = without_hash.trim();
+                                let restored = if trimmed_wh.starts_with('-') {
+                                    format!("  {}", trimmed_wh)
+                                } else {
+                                    format!("  - {}", trimmed_wh)
+                                };
+                                new_lines.push(restored);
+                            } else if !enabled && !is_commented {
+                                modified = true;
+                                new_lines.push(format!("  # {}", trimmed));
+                            } else {
+                                new_lines.push(line.to_string());
+                            }
+                            break;
+                        }
+                    }
+                    if handled {
+                        continue;
+                    }
+                }
+                new_lines.push(line.to_string());
+            }
+
+            if modified {
+                let _ = fs::write(&dict_path, new_lines.join("\n") + "\n");
+                let build_dir = p.join("build");
+                let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
+                let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
+            }
+        }
+    };
+
+    // 格式化 Octagram 上下文语言模型补丁
+    let format_grammar_block = |enable: bool, raw_model: &str, max_l: u32, min_l: u32, is_wx_schema: bool| -> String {
+        let mut s = String::new();
+        if enable {
+            let is_wanxiang = is_wx_schema || raw_model.contains("wanxiang");
+            let model = if !raw_model.trim().is_empty() {
+                raw_model.trim()
+            } else if is_wanxiang {
+                "wanxiang-lts-zh-hans"
+            } else {
+                "zh-hans-t-essay-bgw"
+            };
+            let max_len = if max_l > 0 { max_l } else { 6 };
+            let min_len = if min_l > 0 {
+                min_l
+            } else if is_wanxiang {
+                3
+            } else {
+                2
+            };
+
+            if is_wanxiang {
+                s.push_str("\n  # Octagram 上下文语言模型补丁 (科学调优)\n");
+                s.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
+                s.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
+                s.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
+                s.push_str("  \"grammar/collocation_penalty\": -14\n");
+                s.push_str("  \"grammar/non_collocation_penalty\": -6\n");
+                s.push_str("  \"grammar/weak_collocation_penalty\": -100\n");
+                s.push_str("  \"grammar/rear_penalty\": -20\n");
+                s.push_str("  \"translator/contextual_suggestions\": false\n");
+                s.push_str("  \"translator/max_homophones\": 8\n");
+            } else {
+                s.push_str("\n  # Octagram 上下文语言模型补丁\n");
+                s.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
+                s.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
+                s.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
+                s.push_str("  \"translator/contextual_suggestions\": true\n");
+            }
+        } else {
+            s.push_str("\n  # 禁用 Octagram 语言模型\n");
+            s.push_str("  \"grammar/language\": ~\n");
+            s.push_str("  \"translator/contextual_suggestions\": false\n");
+        }
+        s
+    };
+
     // A. 雾凇拼音 (rime_ice 与所有双拼变体方案)
     let is_ice_family = |id: &str| -> bool {
         id == "rime_ice" ||
@@ -4521,6 +4667,9 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
     let ice_schema_path = u_path.join("rime_ice.schema.yaml");
     let is_ice_active = ice_schema_path.exists() || config.schemas.iter().any(|s| s.enabled && is_ice_family(&s.id));
     if is_ice_active || !u_path.join("default.custom.yaml").exists() {
+        // 同步雾凇词库核心挂载项
+        sync_rime_ice_dict_tables(user_dir, &config.rime_ice_toggles);
+
         // 雾凇拼音词库无损外挂清单维护
         let mounted_custom_dicts: Vec<&CustomDictItem> = config.custom_dicts.iter().filter(|d| d.enabled).collect();
         let has_custom_dicts = !mounted_custom_dicts.is_empty();
@@ -4575,14 +4724,28 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             for table in &core_tables {
                 ext_yaml.push_str(&format!("  - {}\n", table));
             }
-            ext_yaml.push_str("  - rime_ice\n");
             for cd in &mounted_custom_dicts {
                 ext_yaml.push_str(&format!("  - {}\n", cd.name));
             }
             ext_yaml.push_str("...\n");
 
             let ext_path = u_path.join("rime_ice.extended.dict.yaml");
-            let _ = fs::write(ext_path, ext_yaml);
+            let _ = fs::write(&ext_path, ext_yaml);
+
+            let build_dir = u_path.join("build");
+            let _ = fs::remove_file(build_dir.join("rime_ice.extended.table.bin"));
+            let _ = fs::remove_file(build_dir.join("rime_ice.extended.reverse.bin"));
+        } else {
+            // 没有自定义词库时，若曾经存在 extended 文件，清理它并重置主词典
+            let ext_path = u_path.join("rime_ice.extended.dict.yaml");
+            if ext_path.exists() {
+                let _ = fs::remove_file(ext_path);
+            }
+            let build_dir = u_path.join("build");
+            let _ = fs::remove_file(build_dir.join("rime_ice.table.bin"));
+            let _ = fs::remove_file(build_dir.join("rime_ice.reverse.bin"));
+            let _ = fs::remove_file(build_dir.join("rime_ice.extended.table.bin"));
+            let _ = fs::remove_file(build_dir.join("rime_ice.extended.reverse.bin"));
         }
 
         // 收集需要打补丁的雾凇家族方案 ID
@@ -4661,18 +4824,14 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 rime_ice_yaml.push_str("\n  # 词典挂载列表定制（默认核心词库）\n");
             }
 
-            if config.rime_ice_toggles.enable_grammar && !config.rime_ice_toggles.grammar_model.trim().is_empty() {
-                let model = config.rime_ice_toggles.grammar_model.trim();
-                rime_ice_yaml.push_str("\n  # Octagram 上下文语言模型补丁\n");
-                rime_ice_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
-                rime_ice_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", config.rime_ice_toggles.grammar_collocation_max_length));
-                rime_ice_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", config.rime_ice_toggles.grammar_collocation_min_length));
-                rime_ice_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
-            } else {
-                rime_ice_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
-                rime_ice_yaml.push_str("  \"grammar/language\": ~\n");
-                rime_ice_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
-            }
+            let grammar_block = format_grammar_block(
+                config.rime_ice_toggles.enable_grammar,
+                &config.rime_ice_toggles.grammar_model,
+                config.rime_ice_toggles.grammar_collocation_max_length,
+                config.rime_ice_toggles.grammar_collocation_min_length,
+                false,
+            );
+            rime_ice_yaml.push_str(&grammar_block);
 
             if !config.rime_ice_toggles.enable_melt_eng {
                 rime_ice_yaml.push_str("\n  # 禁用英文混输补全 (melt_eng)\n");
@@ -4765,32 +4924,14 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             frost_yaml.push_str(stats_filter_block);
 
             // 白霜拼音 Octagram 上下文语言模型补丁
-            if config.rime_ice_toggles.enable_grammar {
-                let model = if !config.rime_ice_toggles.grammar_model.trim().is_empty() {
-                    config.rime_ice_toggles.grammar_model.trim()
-                } else {
-                    "zh-hans-t-essay-bgw"
-                };
-                let max_len = if config.rime_ice_toggles.grammar_collocation_max_length > 0 {
-                    config.rime_ice_toggles.grammar_collocation_max_length
-                } else {
-                    6
-                };
-                let min_len = if config.rime_ice_toggles.grammar_collocation_min_length > 0 {
-                    config.rime_ice_toggles.grammar_collocation_min_length
-                } else {
-                    2
-                };
-                frost_yaml.push_str("\n  # Octagram 上下文语言模型补丁\n");
-                frost_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
-                frost_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
-                frost_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
-                frost_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
-            } else {
-                frost_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
-                frost_yaml.push_str("  \"grammar/language\": ~\n");
-                frost_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
-            }
+            let frost_grammar_block = format_grammar_block(
+                config.rime_ice_toggles.enable_grammar,
+                &config.rime_ice_toggles.grammar_model,
+                config.rime_ice_toggles.grammar_collocation_max_length,
+                config.rime_ice_toggles.grammar_collocation_min_length,
+                false,
+            );
+            frost_yaml.push_str(&frost_grammar_block);
 
             let _ = validate_yaml(&frost_yaml, &format!("{}.custom.yaml", frost_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", frost_id)), &frost_yaml);
@@ -4851,32 +4992,14 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             mint_yaml.push_str(&mint_bindings_block);
             mint_yaml.push_str(stats_filter_block);
 
-            if config.rime_ice_toggles.enable_grammar {
-                let model = if !config.rime_ice_toggles.grammar_model.trim().is_empty() {
-                    config.rime_ice_toggles.grammar_model.trim()
-                } else {
-                    "zh-hans-t-essay-bgw"
-                };
-                let max_len = if config.rime_ice_toggles.grammar_collocation_max_length > 0 {
-                    config.rime_ice_toggles.grammar_collocation_max_length
-                } else {
-                    6
-                };
-                let min_len = if config.rime_ice_toggles.grammar_collocation_min_length > 0 {
-                    config.rime_ice_toggles.grammar_collocation_min_length
-                } else {
-                    2
-                };
-                mint_yaml.push_str("\n  # Octagram 上下文语言模型补丁\n");
-                mint_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
-                mint_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
-                mint_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
-                mint_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
-            } else {
-                mint_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
-                mint_yaml.push_str("  \"grammar/language\": ~\n");
-                mint_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
-            }
+            let mint_grammar_block = format_grammar_block(
+                config.rime_ice_toggles.enable_grammar,
+                &config.rime_ice_toggles.grammar_model,
+                config.rime_ice_toggles.grammar_collocation_max_length,
+                config.rime_ice_toggles.grammar_collocation_min_length,
+                false,
+            );
+            mint_yaml.push_str(&mint_grammar_block);
 
             let _ = validate_yaml(&mint_yaml, &format!("{}.custom.yaml", mint_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", mint_id)), &mint_yaml);
@@ -4948,32 +5071,14 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             wx_yaml.push_str(stats_filter_block);
 
             // 万象拼音 Octagram 语言模型补丁
-            if config.rime_ice_toggles.enable_grammar {
-                let model = if !config.rime_ice_toggles.grammar_model.trim().is_empty() {
-                    config.rime_ice_toggles.grammar_model.trim()
-                } else {
-                    "zh-hans-t-essay-bgw"
-                };
-                let max_len = if config.rime_ice_toggles.grammar_collocation_max_length > 0 {
-                    config.rime_ice_toggles.grammar_collocation_max_length
-                } else {
-                    6
-                };
-                let min_len = if config.rime_ice_toggles.grammar_collocation_min_length > 0 {
-                    config.rime_ice_toggles.grammar_collocation_min_length
-                } else {
-                    2
-                };
-                wx_yaml.push_str("\n  # Octagram 上下文语言模型补丁\n");
-                wx_yaml.push_str(&format!("  \"grammar/language\": \"{}\"\n", yaml_escape_str(model)));
-                wx_yaml.push_str(&format!("  \"grammar/collocation_max_length\": {}\n", max_len));
-                wx_yaml.push_str(&format!("  \"grammar/collocation_min_length\": {}\n", min_len));
-                wx_yaml.push_str("  \"translator/contextual_suggestions\": true\n");
-            } else {
-                wx_yaml.push_str("\n  # 禁用 Octagram 语言模型\n");
-                wx_yaml.push_str("  \"grammar/language\": ~\n");
-                wx_yaml.push_str("  \"translator/contextual_suggestions\": false\n");
-            }
+            let wx_grammar_block = format_grammar_block(
+                config.rime_ice_toggles.enable_grammar,
+                &config.rime_ice_toggles.grammar_model,
+                config.rime_ice_toggles.grammar_collocation_max_length,
+                config.rime_ice_toggles.grammar_collocation_min_length,
+                true,
+            );
+            wx_yaml.push_str(&wx_grammar_block);
 
             let _ = validate_yaml(&wx_yaml, &format!("{}.custom.yaml", wx_id));
             let _ = fs::write(u_path.join(format!("{}.custom.yaml", wx_id)), &wx_yaml);
