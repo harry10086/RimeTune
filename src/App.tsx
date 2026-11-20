@@ -58,6 +58,7 @@ export function App() {
 
   const [saving, setSaving] = useState(false);
   const [deploying, setDeploying] = useState(false);
+  const [deployCount, setDeployCount] = useState(0);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [lastDeployResult, setLastDeployResult] = useState<DeployResult | null>(null);
 
@@ -346,6 +347,7 @@ export function App() {
       });
       setLastDeployResult(res);
       showToast(res.message, res.success ? 'success' : 'error');
+      setDeployCount((c) => c + 1);
 
       // 刷新环境状态与全量配置（确保当前主方案、补丁及各特性开关即时同步）
       try {
@@ -388,6 +390,7 @@ export function App() {
       });
       setLastDeployResult(res);
       showToast(res.message, res.success ? 'success' : 'error');
+      setDeployCount((c) => c + 1);
 
       // 刷新环境状态
       try {
@@ -780,6 +783,7 @@ export function App() {
                   userDir={env?.rime_user_dir}
                   activeSchemaId={env?.active_schema_id}
                   availableGrammarModels={env?.available_grammar_models}
+                  deployCount={deployCount}
                   onFuzzyChange={(newFuzzy) => setConfig((prev) => prev ? { ...prev, fuzzy_pinyin: newFuzzy } : prev)}
                   onTogglesChange={(newToggles) => setConfig((prev) => prev ? { ...prev, rime_ice_toggles: newToggles } : prev)}
                   onCustomDictsChange={(newCustomDicts) => setConfig((prev) => prev ? { ...prev, custom_dicts: newCustomDicts } : prev)}

@@ -1904,6 +1904,53 @@ pub fn scan_installed_dicts(user_dir: &str) -> Vec<DictFileInfo> {
     dicts
 }
 
+/// 解析 Rime 词典 import_tables 下的一行
+/// 支持识别启用（`- table`）、停用（`# - table`）、以及行内注释
+/// 且能自愈历史损坏（如无 '#' 分隔的行内注释），确保 table 名绝对纯净不带注释与空格
+/// 返回: Option<(is_enabled, clean_table_name, inline_comment)>
+pub fn parse_import_table_line(raw_line: &str) -> Option<(bool, String, String)> {
+    let trimmed = raw_line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (is_enabled, remainder) = if trimmed.starts_with("- ") || trimmed.starts_with('-') {
+        (true, trimmed.trim_start_matches('-').trim())
+    } else if trimmed.starts_with("# -") || trimmed.starts_with("#-") {
+        (false, trimmed.trim_start_matches('#').trim().trim_start_matches('-').trim())
+    } else {
+        return None;
+    };
+
+    if remainder.is_empty() {
+        return None;
+    }
+
+    let (table_raw, inline_comment) = if let Some((left, right)) = remainder.split_once('#') {
+        (left.trim(), right.trim().to_string())
+    } else {
+        let mut parts = remainder.split_whitespace();
+        if let Some(first) = parts.next() {
+            let rest: Vec<&str> = parts.collect();
+            (first, rest.join(" "))
+        } else {
+            (remainder, String::new())
+        }
+    };
+
+    let table_name = table_raw.trim().trim_matches(['\'', '\"']).to_string();
+    if table_name.is_empty() {
+        return None;
+    }
+
+    // Rime table 名必须为合法的路径或标号（ASCII），不能包含空格或中文字符
+    if table_name.chars().any(|c| c.is_whitespace() || !c.is_ascii()) {
+        return None;
+    }
+
+    Some((is_enabled, table_name, inline_comment))
+}
+
 pub fn scan_custom_dicts(user_dir: &str) -> Vec<CustomDictItem> {
     let mut list = Vec::new();
     let u_path = Path::new(user_dir);
@@ -1916,11 +1963,20 @@ pub fn scan_custom_dicts(user_dir: &str) -> Vec<CustomDictItem> {
     let ext_path = u_path.join("rime_ice.extended.dict.yaml");
     if ext_path.exists() {
         if let Ok(content) = fs::read_to_string(&ext_path) {
-            if let Ok(val) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
-                if let Some(tables) = val.get("import_tables").and_then(|v| v.as_sequence()) {
-                    for t in tables {
-                        if let Some(s) = t.as_str() {
-                            mounted_names.insert(s.to_string());
+            let mut in_import = false;
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed == "import_tables:" {
+                    in_import = true;
+                    continue;
+                }
+                if in_import {
+                    if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
+                        break;
+                    }
+                    if let Some((is_enabled, table_name, _)) = parse_import_table_line(line) {
+                        if is_enabled {
+                            mounted_names.insert(table_name);
                         }
                     }
                 }
@@ -1942,10 +1998,10 @@ pub fn scan_custom_dicts(user_dir: &str) -> Vec<CustomDictItem> {
                         if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
                             break;
                         }
-                        if trimmed.starts_with("- ") || trimmed.starts_with('-') {
-                            let clean = trimmed.trim_start_matches('-').trim();
-                            let table_name = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
-                            mounted_names.insert(table_name.to_string());
+                        if let Some((is_enabled, table_name, _)) = parse_import_table_line(line) {
+                            if is_enabled {
+                                mounted_names.insert(table_name);
+                            }
                         }
                     }
                 }
@@ -2217,6 +2273,7 @@ pub fn detect_schema_dict_mounts(user_dir: &str, schema_id: &str) -> SchemaDictM
     if found_dict_path.exists() {
         if let Ok(content) = fs::read_to_string(&found_dict_path) {
             let mut in_import_tables = false;
+            let mut seen_tables = std::collections::HashSet::new();
 
             for raw_line in content.lines() {
                 let trimmed = raw_line.trim();
@@ -2232,29 +2289,15 @@ pub fn detect_schema_dict_mounts(user_dir: &str, schema_id: &str) -> SchemaDictM
                         break;
                     }
 
-                    let (is_enabled, line_data) = if trimmed.starts_with("- ") || trimmed.starts_with('-') {
-                        (true, trimmed.trim_start_matches('-').trim())
-                    } else if trimmed.starts_with("# -") || trimmed.starts_with("#-") {
-                        (false, trimmed.trim_start_matches('#').trim().trim_start_matches('-').trim())
-                    } else {
-                        continue;
+                    let (is_enabled, table_name, inline_comment) = match parse_import_table_line(raw_line) {
+                        Some(v) => v,
+                        None => continue,
                     };
 
-                    if line_data.is_empty() {
+                    if seen_tables.contains(&table_name) {
                         continue;
                     }
-
-                    // 拆分出 table 名和行内注释
-                    let (table_raw, inline_comment) = if let Some((left, right)) = line_data.split_once('#') {
-                        (left.trim(), right.trim())
-                    } else {
-                        (line_data, "")
-                    };
-
-                    let table_name = table_raw.trim().trim_matches(['\'', '\"']).to_string();
-                    if table_name.is_empty() {
-                        continue;
-                    }
+                    seen_tables.insert(table_name.clone());
 
                     // 检查物理文件是否存在与计算大小
                     let mut file_exists = false;
@@ -2352,51 +2395,37 @@ pub fn toggle_table_in_file(dict_path: &Path, table_name: &str, enable: bool) ->
                 continue;
             }
 
-            // 判断此行是否对应指定的 table_name
-            let is_target_line = {
-                let clean = if trimmed.starts_with('-') {
-                    trimmed.trim_start_matches('-').trim()
-                } else if trimmed.starts_with('#') {
-                    let un_hash = trimmed.trim_start_matches('#').trim();
-                    if un_hash.starts_with('-') {
-                        un_hash.trim_start_matches('-').trim()
-                    } else {
-                        un_hash
+            if let Some((_, parsed_name, comment)) = parse_import_table_line(line) {
+                if parsed_name == table_name {
+                    if found {
+                        // 已经处理过同名表，过滤掉重复行（自动自愈排重）
+                        modified = true;
+                        continue;
                     }
-                } else {
-                    ""
-                };
-                let item_name = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
-                item_name == table_name
-            };
+                    found = true;
 
-            if is_target_line {
-                found = true;
-                if enable {
-                    // 启用：移除开头的 #
-                    let without_hash = line.replacen('#', "", 1);
-                    let trimmed_wh = without_hash.trim();
-                    let restored = if trimmed_wh.starts_with('-') {
-                        format!("  {}", trimmed_wh)
+                    let new_line = if enable {
+                        if comment.is_empty() {
+                            format!("  - {}", table_name)
+                        } else {
+                            let pad = if table_name.len() < 18 { 18 - table_name.len() } else { 1 };
+                            format!("  - {}{} # {}", table_name, " ".repeat(pad), comment)
+                        }
                     } else {
-                        format!("  - {}", trimmed_wh)
+                        if comment.is_empty() {
+                            format!("  # - {}", table_name)
+                        } else {
+                            let pad = if table_name.len() < 16 { 16 - table_name.len() } else { 1 };
+                            format!("  # - {}{} # {}", table_name, " ".repeat(pad), comment)
+                        }
                     };
-                    if line != restored {
+
+                    if line != new_line {
                         modified = true;
                     }
-                    new_lines.push(restored);
-                } else {
-                    // 禁用：在开头加 #
-                    let trimmed_item = line.trim();
-                    let commented = if trimmed_item.starts_with('#') {
-                        line.to_string()
-                    } else {
-                        modified = true;
-                        format!("  # {}", trimmed_item)
-                    };
-                    new_lines.push(commented);
+                    new_lines.push(new_line);
+                    continue;
                 }
-                continue;
             }
         }
 
@@ -2444,17 +2473,15 @@ pub fn detect_dict_mount_states(u_path: &Path, schema_id: &str, toggles: &mut Ri
                         if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
                             break;
                         }
-                        if trimmed.starts_with("- ") || trimmed.starts_with('-') {
+                        if let Some((is_enabled, tbl, _)) = parse_import_table_line(line) {
                             has_import_section = true;
-                            let clean = trimmed.trim_start_matches('-').trim();
-                            let tbl = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
-                            if tbl.contains("41448") { lc = true; }
-                            if tbl.ends_with("base") || tbl.contains("/base") { base = true; }
-                            if tbl.ends_with("ext") || tbl.contains("/ext") { ext = true; }
-                            if tbl.contains("tencent") { tencent = true; }
-                            if tbl.ends_with("others") || tbl.contains("/others") { others = true; }
-                        } else if trimmed.starts_with("# -") || trimmed.starts_with("#-") || trimmed.starts_with('#') {
-                            has_import_section = true;
+                            if is_enabled {
+                                if tbl.contains("41448") { lc = true; }
+                                if tbl.ends_with("base") || tbl.contains("/base") { base = true; }
+                                if tbl.ends_with("ext") || tbl.contains("/ext") { ext = true; }
+                                if tbl.contains("tencent") { tencent = true; }
+                                if tbl.ends_with("others") || tbl.contains("/others") { others = true; }
+                            }
                         }
                     }
                 }
@@ -2499,17 +2526,15 @@ pub fn detect_dict_mount_states(u_path: &Path, schema_id: &str, toggles: &mut Ri
                             if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
                                 break;
                             }
-                            if trimmed.starts_with("- ") || trimmed.starts_with('-') {
+                            if let Some((is_enabled, tbl, _)) = parse_import_table_line(line) {
                                 has_import_section = true;
-                                let clean = trimmed.trim_start_matches('-').trim();
-                                let tbl = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
-                                if tbl.contains("41448") { lc = true; }
-                                if tbl.ends_with("base") || tbl.contains("/base") { base = true; }
-                                if tbl.ends_with("ext") || tbl.contains("/ext") { ext = true; }
-                                if tbl.contains("tencent") { tencent = true; }
-                                if tbl.ends_with("others") || tbl.contains("/others") { others = true; }
-                            } else if trimmed.starts_with("# -") || trimmed.starts_with("#-") || trimmed.starts_with('#') {
-                                has_import_section = true;
+                                if is_enabled {
+                                    if tbl.contains("41448") { lc = true; }
+                                    if tbl.ends_with("base") || tbl.contains("/base") { base = true; }
+                                    if tbl.ends_with("ext") || tbl.contains("/ext") { ext = true; }
+                                    if tbl.contains("tencent") { tencent = true; }
+                                    if tbl.ends_with("others") || tbl.contains("/others") { others = true; }
+                                }
                             }
                         }
                     }
@@ -4756,15 +4781,25 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             ext_yaml.push_str("# Rime dictionary\n# encoding: utf-8\n# 由 WeaselTune 自动生成的雾凇扩展词典挂载清单\n---\n");
             ext_yaml.push_str("name: rime_ice.extended\nversion: \"1.0\"\nsort: by_weight\nuse_preset_vocabulary: true\nimport_tables:\n");
 
-            let mut core_tables = Vec::new();
-            core_tables.push("cn_dicts/8105".to_string());
-            if config.rime_ice_toggles.dict_large_char { core_tables.push("cn_dicts/41448".to_string()); }
-            if config.rime_ice_toggles.dict_base { core_tables.push("cn_dicts/base".to_string()); }
-            if config.rime_ice_toggles.dict_ext { core_tables.push("cn_dicts/ext".to_string()); }
-            if config.rime_ice_toggles.dict_tencent { core_tables.push("cn_dicts/tencent".to_string()); }
-            if config.rime_ice_toggles.dict_others { core_tables.push("cn_dicts/others".to_string()); }
+            let core_tables: [(&str, bool); 6] = [
+                ("cn_dicts/8105", true),
+                ("cn_dicts/41448", config.rime_ice_toggles.dict_large_char),
+                ("cn_dicts/base", config.rime_ice_toggles.dict_base),
+                ("cn_dicts/ext", config.rime_ice_toggles.dict_ext),
+                ("cn_dicts/tencent", config.rime_ice_toggles.dict_tencent),
+                ("cn_dicts/others", config.rime_ice_toggles.dict_others),
+            ];
+
+            for (tbl, enabled) in &core_tables {
+                if *enabled {
+                    ext_yaml.push_str(&format!("  - {}\n", tbl));
+                } else {
+                    ext_yaml.push_str(&format!("  # - {}\n", tbl));
+                }
+            }
 
             // 保留 rime_ice.dict.yaml 中用户挂载的其他非核心表（如搜狗细胞词库等）
+            let mut other_tables: Vec<(String, bool)> = Vec::new();
             let ice_dict_path = u_path.join("rime_ice.dict.yaml");
             if ice_dict_path.exists() {
                 if let Ok(c) = fs::read_to_string(&ice_dict_path) {
@@ -4779,19 +4814,16 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                             if (!trimmed.starts_with('-') && !trimmed.starts_with('#') && trimmed.contains(':')) || trimmed == "..." {
                                 break;
                             }
-                            if trimmed.starts_with("- ") || trimmed.starts_with('-') {
-                                let clean = trimmed.trim_start_matches('-').trim();
-                                let tbl = clean.split('#').next().unwrap_or("").trim().trim_matches(['\'', '\"']);
-                                if !tbl.is_empty()
-                                    && !tbl.contains("8105")
+                            if let Some((is_enabled, tbl, _)) = parse_import_table_line(line) {
+                                if !tbl.contains("8105")
                                     && !tbl.contains("41448")
                                     && !tbl.ends_with("base")
                                     && !tbl.ends_with("ext")
                                     && !tbl.contains("tencent")
                                     && !tbl.ends_with("others")
-                                    && !core_tables.contains(&tbl.to_string())
+                                    && !other_tables.iter().any(|(t, _)| t == &tbl)
                                 {
-                                    core_tables.push(tbl.to_string());
+                                    other_tables.push((tbl, is_enabled));
                                 }
                             }
                         }
@@ -4799,9 +4831,14 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
                 }
             }
 
-            for table in &core_tables {
-                ext_yaml.push_str(&format!("  - {}\n", table));
+            for (tbl, enabled) in &other_tables {
+                if *enabled {
+                    ext_yaml.push_str(&format!("  - {}\n", tbl));
+                } else {
+                    ext_yaml.push_str(&format!("  # - {}\n", tbl));
+                }
             }
+
             for cd in &mounted_custom_dicts {
                 ext_yaml.push_str(&format!("  - {}\n", cd.name));
             }

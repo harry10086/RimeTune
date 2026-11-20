@@ -43,6 +43,7 @@ interface RimeIceViewProps {
   onTogglesChange: (toggles: RimeIceToggles) => void;
   onCustomDictsChange?: (customDicts: CustomDictItem[]) => void;
   onRefresh?: () => Promise<void>;
+  deployCount?: number;
 }
 
 export const RimeIceView: React.FC<RimeIceViewProps> = ({
@@ -58,6 +59,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
   onTogglesChange,
   onCustomDictsChange,
   onRefresh: _onRefresh,
+  deployCount,
 }) => {
   // 过滤内部反查专用组件（如 radical_pinyin 部件拆字、wanxiang_reverse 反查辅码）
   const validSchemas = useMemo(() => {
@@ -254,7 +256,7 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
         }
       })
       .catch((err) => console.error('Failed to get schema state config:', err));
-  }, [userDir, selectedSchemaId]);
+  }, [userDir, selectedSchemaId, deployCount]);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -276,15 +278,16 @@ export const RimeIceView: React.FC<RimeIceViewProps> = ({
 
     // 若当前为雾凇方案（含双拼），联动更新对应 toggles 状态
     if (isIce) {
-      if (tableName.includes('41448')) {
+      const cleanName = tableName.trim().split(/\s+/)[0];
+      if (cleanName.includes('41448')) {
         updateToggles({ dict_large_char: enabled });
-      } else if (tableName.endsWith('base') || tableName.includes('base')) {
+      } else if (cleanName.endsWith('base') || cleanName.includes('/base')) {
         updateToggles({ dict_base: enabled });
-      } else if (tableName.includes('tencent')) {
+      } else if (cleanName.includes('tencent')) {
         updateToggles({ dict_tencent: enabled });
-      } else if (tableName.endsWith('ext')) {
+      } else if (cleanName.endsWith('ext') || cleanName.includes('/ext')) {
         updateToggles({ dict_ext: enabled });
-      } else if (tableName.endsWith('others')) {
+      } else if (cleanName.endsWith('others') || cleanName.includes('/others')) {
         updateToggles({ dict_others: enabled });
       }
     }

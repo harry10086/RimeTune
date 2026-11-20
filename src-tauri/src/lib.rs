@@ -1338,7 +1338,8 @@ import_tables:
         let ext_dict_content = std::fs::read_to_string(temp_dir.join("rime_ice.extended.dict.yaml")).unwrap();
         assert!(ext_dict_content.contains("cn_dicts/8105"), "extended dict must contain 8105");
         assert!(ext_dict_content.contains("cn_dicts/base"), "extended dict must contain base");
-        assert!(!ext_dict_content.contains("cn_dicts/ext"), "extended dict must NOT contain ext because it was disabled");
+        assert!(ext_dict_content.contains("# - cn_dicts/ext"), "extended dict must contain commented out ext");
+        assert!(!ext_dict_content.contains("\n  - cn_dicts/ext"), "extended dict must NOT contain enabled ext");
         assert!(ext_dict_content.contains("custom_dicts/test_dict"), "extended dict must contain custom dict");
 
         // 5. 验证保存后全量重读时：ext 保持关闭，custom dict 保持开启
@@ -1358,6 +1359,51 @@ import_tables:
 
         let rime_ice_synced = std::fs::read_to_string(temp_dir.join("rime_ice.dict.yaml")).unwrap();
         assert!(rime_ice_synced.contains("- cn_dicts/ext"), "rime_ice.dict.yaml must have - cn_dicts/ext restored");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_toggle_table_inline_comments_and_deduplication() {
+        let temp_dir = std::env::temp_dir().join(format!("rimetune_comment_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let dict_file = temp_dir.join("test.dict.yaml");
+
+        // 包含行内注释、历史损坏缺少 # 的注释、以及重复行
+        let content = r#"# Rime dictionary
+---
+name: test
+import_tables:
+  - cn_dicts/8105       # 通用汉字
+  - cn_dicts/base       # 基础词库
+  - cn_dicts/base       # 基础词库重复行
+  - cn_dicts/41448      大字表生僻字无井号
+...
+"#;
+        std::fs::write(&dict_file, content).unwrap();
+
+        // 1. 关闭 cn_dicts/base：行内注释必须保留 #，且重复行被清除
+        let res = patcher::toggle_table_in_file(&dict_file, "cn_dicts/base", false);
+        assert!(res.is_ok());
+        let read1 = std::fs::read_to_string(&dict_file).unwrap();
+        assert!(read1.contains("# - cn_dicts/base"), "must comment out base");
+        assert!(read1.contains("# 基础词库"), "comment must retain its hash symbol");
+        assert_eq!(read1.matches("cn_dicts/base").count(), 1, "duplicates must be eliminated");
+
+        // 2. 重新开启 cn_dicts/base：行内注释必须保留 #
+        let res2 = patcher::toggle_table_in_file(&dict_file, "cn_dicts/base", true);
+        assert!(res2.is_ok());
+        let read2 = std::fs::read_to_string(&dict_file).unwrap();
+        assert!(read2.contains("- cn_dicts/base"), "must uncomment base");
+        assert!(read2.contains("# 基础词库"), "comment must retain its hash symbol");
+        assert_eq!(read2.matches("cn_dicts/base").count(), 1, "must remain deduplicated");
+
+        // 3. 关闭 cn_dicts/41448：之前缺少 # 的注释应当被自愈
+        let res3 = patcher::toggle_table_in_file(&dict_file, "cn_dicts/41448", false);
+        assert!(res3.is_ok());
+        let read3 = std::fs::read_to_string(&dict_file).unwrap();
+        assert!(read3.contains("# - cn_dicts/41448"), "must comment out 41448");
+        assert!(read3.contains("# 大字表生僻字无井号"), "healed comment must have hash symbol");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
