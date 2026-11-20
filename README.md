@@ -2,6 +2,12 @@
 
 RimeTune 是一款专为 **Rime（中州韵输入法引擎）全平台（Windows 小狼毫 Weasel、macOS 鼠须管 Squirrel、Linux ibus/fcitx5-rime）** 量身打造的现代图形化配置与管理中心。
 
+> 牛B吹大了，实际上也就是 Windows 下测试还充分一点，Linux 平台我试装了 Ubuntu 系列，Fedora，Linux Mint，Debian 等等，桌面环境 GNOME，KDE Plasma，Xfce，MATE，Cinnamon 等。而 RIME 还有 Fcitx5 和 iBus，架构又有 Wayland，X11.
+> 开始我觉得不就是搞个图形界面修改 YAML 文件嘛，没想到各种问题一堆一堆的，按下葫芦浮起瓢，AI 烧糊了都改不过来。
+> 而且我还没有 macOS 设备，根本无法测试 Mac 版。现在最便宜的 Mac mini 也得几千，暂时是没钱配置了。
+> 我当前在 Debian 13 MATE 系统下，测了 Fcitx5-rime，勉强可用吧，我估计在 Linux 实际运行环境中，问题还不少。
+> 有喜欢本软件的可以自行修改代码，PR 我来合并吧。
+
 基于 **Tauri 2.x + Rust + React 19 + TypeScript** 构建，具备极小体积、极速启动、多平台路径自动抹平、原生底层支持与高保真现代化视觉体验。
 
 ![dashboard](https://github.mianao.info/https://raw.githubusercontent.com/harry10086/picx-images-hosting/master/Rime/dashboard.webp)
@@ -281,6 +287,33 @@ RimeTune/
 ---
 
 ## 📦 版本更新日志
+
+### v0.3.4 版本更新摘要
+ * 🐧 **Linux (Fcitx5-Rime) 特定应用专属规则 (app_options) 彻底修复**：
+   - **打通 Fcitx5 专属配置映射**：修复原先将应用规则误写入 `default.custom.yaml` 导致 Fcitx5 读取空配置的缺陷；现已按照 `fcitx5-rime` 底层规范自动生成标准 `fcitx5.custom.yaml`、用户目录 `fcitx5.yaml` 及预编译的 `build/fcitx5.yaml`；
+   - **精准匹配程序名与自动去冗**：自动过滤 Linux 程序名称中多余的 `.exe` 后缀，保证与 Fcitx5 窗口 `program` 标识（如 `mate-terminal`、`firefox-esr`、`code`）100% 精准匹配，实现打开终端或特定应用自动切换为西文直接输入字母；
+   - **共享输入状态智能防坑提示**：明确指导并排查 Fcitx5 全局“共享输入状态”，避免多应用间输入法中英状态相互污染。
+ * 🚀 **全平台（Windows / Linux / macOS）特定应用专属行为交互革新**：
+   - **智能实时探测运行中应用**：
+     - Linux 下自动枚举活动进程并关联桌面 `.desktop` 与窗口名；
+     - Windows 下自动过滤系统底层后台服务（`svchost.exe`、`csrss.exe`、`dwm.exe` 等干扰项），精准捕获前台真实运行的桌面 GUI 软件；
+     - 顶部以动态绿点胶囊实时展示当前运行应用，支持 **一键点击免输入直接添加** 专属规则；
+   - **输入框智能联想与自动容错**：配备 Datalist 智能下拉补全；在 Windows 下输入程序名未填 `.exe` 时自动规范补全；
+   - **跨平台实用指南折叠栏**：内置 Linux（`xprop WM_CLASS`）、Windows（任务管理器详细信息标签）、macOS（Bundle ID）的进程名精准获取指南；
+   - **界面内一键保存并部署**：在「应用规则」界面内部新增快捷保存并部署按钮，即设即用无需反复切页；
+   - **持久化布尔值安全防丢**：修复当应用规则项设为 `false`（如关闭英文模式或关闭行内预编辑）时重新载入被误清空的隐患，显式输出标准布尔值。
+ * 📚 **扩展词库与字表挂载开关持久化与双向联动 Bug 根除**：
+   - **彻底解决词库开关状态还原与串扰**：深入重构 `import_tables` 词库表名解析与回写引擎，彻底解决导入外部自定义词库时导致扩展词库开关被联动误关、以及开关修改保存部署后自动还原的严重问题；
+   - **行内注释与格式高保真解析**：修复 `parse_import_table_line` 对注释前缀处理的逻辑缺陷，杜绝行内注释中的 `#` 导致词库名解析断裂；
+   - **表单去重与容错保护**：自动净化 `import_tables` 列表，清除重复项与多余空行，确保扩展词库与用户自定义外挂词库各自独立精准持久化。
+ * 🪟 **Linux (Debian / MATE 等) 文件夹及文件选择器弹出未置顶问题修复**：
+   - **GTK 原生对话框深度重构**：全面重构 Linux 下的同步目录选择器（`pick_sync_folder`）与词库文件选择器（`import_dict_file_dialog`）；
+   - **显式置顶与焦点夺取**：显式声明 `set_keep_above(True)`、`set_modal(True)`、`set_position(CENTER)` 并调用 `present()` 强行索取焦点与置顶，彻底根除子进程弹窗被桌面管理器防焦点抢占机制降到任务栏下方或失去焦点的糟糕体验；
+   - **双重平滑兜底**：在极简 Linux 环境缺失 GTK 时平滑降级调用带 `--modal` 参数的 Zenity。
+ * ⌨️ **双拼方案下输入特性界面与布局体验精细化**：
+   - **双拼特性自适应隐藏**：在切换为双拼方案（如小鹤双拼、微软双拼等）时，自动屏蔽不兼容的全拼拼音运算与模糊音开关，保持界面聚焦干净；
+   - **按钮布局人体工学优化**：将「设为默认方案」按钮位置调整至右侧与启用开关并列，简化交互动线；
+   - **拼音提示排版优化**：修复候选词旁拼音提示开关状态文案排版（由竖排改为工整横排）。
 
 ### v0.3.3 版本更新摘要
  * 🐧 **Linux (Fedora KDE 45 等) 原生输入方案精准识别与探测**：
