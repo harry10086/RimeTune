@@ -2658,18 +2658,66 @@ if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
 
     #[cfg(target_os = "linux")]
     {
-        let output = std::process::Command::new("zenity")
-            .args(["--file-selection", "--title=请选择要导入的 Rime 词库文件", "--file-filter=*.dict.yaml *.txt"])
-            .output();
+        // 优先使用原生 GTK 对话框（显式设置 set_keep_above(True)、set_modal(True) 与 present() 强行置顶激活）
+        let py_script = r#"
+import sys
+try:
+    import gi
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import Gtk
+    dialog = Gtk.FileChooserDialog(
+        title='请选择要导入的 Rime 词库文件',
+        action=Gtk.FileChooserAction.OPEN
+    )
+    dialog.add_buttons(
+        Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+        Gtk.STOCK_OPEN, Gtk.ResponseType.OK
+    )
+    dialog.set_keep_above(True)
+    dialog.set_modal(True)
+    dialog.set_position(Gtk.WindowPosition.CENTER)
 
-        if let Ok(o) = output {
-            let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if raw.is_empty() {
-                return Ok(None);
+    filter_dict = Gtk.FileFilter()
+    filter_dict.set_name('Rime 词库文件 (*.dict.yaml, *.txt)')
+    filter_dict.add_pattern('*.dict.yaml')
+    filter_dict.add_pattern('*.txt')
+    dialog.add_filter(filter_dict)
+
+    filter_all = Gtk.FileFilter()
+    filter_all.set_name('所有文件 (*.*)')
+    filter_all.add_pattern('*')
+    dialog.add_filter(filter_all)
+
+    dialog.present()
+    res = dialog.run()
+    if res == Gtk.ResponseType.OK:
+        print(dialog.get_filename())
+    dialog.destroy()
+except Exception:
+    sys.exit(1)
+"#;
+        let mut got_file = false;
+        if let Ok(py_out) = std::process::Command::new("python3").args(["-c", py_script]).output() {
+            if py_out.status.success() {
+                let raw = String::from_utf8_lossy(&py_out.stdout).trim().to_string();
+                if !raw.is_empty() {
+                    selected_path_str = raw;
+                    got_file = true;
+                }
             }
-            selected_path_str = raw;
-        } else {
-            return Ok(None);
+        }
+
+        if !got_file && selected_path_str.is_empty() {
+            let output = std::process::Command::new("zenity")
+                .args(["--file-selection", "--modal", "--title=请选择要导入的 Rime 词库文件", "--file-filter=*.dict.yaml *.txt"])
+                .output();
+
+            if let Ok(o) = output {
+                let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if !raw.is_empty() {
+                    selected_path_str = raw;
+                }
+            }
         }
     }
 

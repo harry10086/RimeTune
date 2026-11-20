@@ -156,8 +156,48 @@ if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
 
     #[cfg(target_os = "linux")]
     {
+        // 优先使用原生 GTK 对话框（显式设置 set_keep_above(True)、set_modal(True) 与 present() 强行置顶激活），
+        // 解决在 MATE / GNOME 等桌面上子进程弹窗被窗口管理器当成非活动窗口而降到任务栏下方或失去焦点的问题
+        let py_script = r#"
+import sys
+try:
+    import gi
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import Gtk
+    dialog = Gtk.FileChooserDialog(
+        title='请选择 Rime 同步文件夹',
+        action=Gtk.FileChooserAction.SELECT_FOLDER
+    )
+    dialog.add_buttons(
+        Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+        Gtk.STOCK_OPEN, Gtk.ResponseType.OK
+    )
+    dialog.set_keep_above(True)
+    dialog.set_modal(True)
+    dialog.set_position(Gtk.WindowPosition.CENTER)
+    dialog.present()
+    res = dialog.run()
+    if res == Gtk.ResponseType.OK:
+        print(dialog.get_filename())
+    dialog.destroy()
+except Exception:
+    sys.exit(1)
+"#;
+
+        if let Ok(py_out) = Command::new("python3").args(["-c", py_script]).output() {
+            if py_out.status.success() {
+                let raw = String::from_utf8_lossy(&py_out.stdout).trim().to_string();
+                if !raw.is_empty() {
+                    return Ok(Some(raw));
+                } else {
+                    return Ok(None);
+                }
+            }
+        }
+
+        // 备用兜底方案：zenity 模态弹窗
         let output = Command::new("zenity")
-            .args(["--file-selection", "--directory", "--title=请选择 Rime 同步文件夹"])
+            .args(["--file-selection", "--directory", "--modal", "--title=请选择 Rime 同步文件夹"])
             .output();
 
         if let Ok(o) = output {
