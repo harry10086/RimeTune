@@ -851,6 +851,8 @@ pub fn detect_system_applications() -> Vec<SystemAppItem> {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         let mut running_processes = std::collections::HashSet::new();
+        let mut console_processes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
         let mut cmd = std::process::Command::new("tasklist");
         cmd.args(&["/FO", "CSV", "/NH"]);
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -859,10 +861,28 @@ pub fn detect_system_applications() -> Vec<SystemAppItem> {
             if let Ok(stdout) = String::from_utf8(output.stdout) {
                 for line in stdout.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with('"') {
-                        if let Some(end_quote) = trimmed[1..].find('"') {
-                            let exe = &trimmed[1..=end_quote];
-                            running_processes.insert(exe.to_lowercase());
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    // CSV 格式通常为: "Image Name","PID","Session Name","Session#","Mem Usage"
+                    let tokens: Vec<String> = trimmed
+                        .split("\",\"")
+                        .map(|t| t.trim_matches('"').trim().to_string())
+                        .collect();
+
+                    if let Some(exe) = tokens.first() {
+                        if !exe.is_empty() {
+                            let exe_lower = exe.to_lowercase();
+                            running_processes.insert(exe_lower.clone());
+
+                            let is_console = tokens
+                                .get(2)
+                                .map(|s| s.eq_ignore_ascii_case("Console") || (!s.eq_ignore_ascii_case("Services") && s != "0"))
+                                .unwrap_or(true);
+
+                            if is_console && !console_processes.contains_key(&exe_lower) {
+                                console_processes.insert(exe_lower, exe.clone());
+                            }
                         }
                     }
                 }
@@ -873,21 +893,49 @@ pub fn detect_system_applications() -> Vec<SystemAppItem> {
             ("windowsterminal.exe", "Windows 终端 (Terminal)"),
             ("cmd.exe", "命令提示符 (CMD)"),
             ("powershell.exe", "PowerShell 终端"),
+            ("pwsh.exe", "PowerShell Core"),
             ("code.exe", "Visual Studio Code"),
+            ("cursor.exe", "Cursor AI 编辑器"),
+            ("zed.exe", "Zed 编辑器"),
             ("chrome.exe", "Google Chrome"),
             ("msedge.exe", "Microsoft Edge"),
             ("firefox.exe", "Mozilla Firefox"),
-            ("notepad.exe", "记事本"),
+            ("notepad.exe", "Windows 记事本"),
+            ("notepad++.exe", "Notepad++"),
             ("wechat.exe", "微信 (WeChat)"),
+            ("wechatappex.exe", "微信小程序 (WeChat AppEx)"),
             ("qq.exe", "腾讯 QQ"),
             ("feishu.exe", "飞书 (Lark)"),
             ("dingtalk.exe", "钉钉 (DingTalk)"),
             ("obsidian.exe", "Obsidian 笔记"),
+            ("typora.exe", "Typora Markdown"),
             ("idea64.exe", "IntelliJ IDEA"),
             ("pycharm64.exe", "PyCharm"),
+            ("webstorm64.exe", "WebStorm"),
+            ("goland64.exe", "GoLand"),
+            ("clion64.exe", "CLion"),
+            ("rider64.exe", "Rider"),
             ("devenv.exe", "Visual Studio IDE"),
             ("sublime_text.exe", "Sublime Text"),
             ("nvim-qt.exe", "Neovim GUI"),
+            ("alacritty.exe", "Alacritty 终端"),
+            ("wezterm-gui.exe", "WezTerm 终端"),
+            ("tabby.exe", "Tabby 终端"),
+            ("gitkraken.exe", "GitKraken"),
+            ("sourcetree.exe", "SourceTree"),
+            ("navicat.exe", "Navicat 数据库"),
+            ("dbeaver.exe", "DBeaver 数据库"),
+            ("postman.exe", "Postman API"),
+            ("apifox.exe", "Apifox"),
+            ("potplayer64.exe", "PotPlayer 播放器"),
+            ("telegram.exe", "Telegram 聊天"),
+            ("wps.exe", "WPS Office"),
+            ("winword.exe", "Microsoft Word"),
+            ("excel.exe", "Microsoft Excel"),
+            ("powerpnt.exe", "Microsoft PowerPoint"),
+            ("steam.exe", "Steam 客户端"),
+            ("qqmusic.exe", "QQ 音乐"),
+            ("cloudmusic.exe", "网易云音乐"),
         ];
 
         for (exe, label) in &well_known_windows_apps {
@@ -898,6 +946,35 @@ pub fn detect_system_applications() -> Vec<SystemAppItem> {
                 name: exe.to_string(),
                 display_name: label.to_string(),
                 is_running,
+            });
+        }
+
+        // 过滤常见的 Windows 底层系统与后台驱动服务进程，保留真实运行的桌面应用
+        let system_ignore_set: std::collections::HashSet<&str> = [
+            "system", "system idle process", "registry", "smss.exe", "csrss.exe", "wininit.exe",
+            "winlogon.exe", "services.exe", "lsaiso.exe", "lsass.exe", "svchost.exe", "wudfhost.exe",
+            "fontdrvhost.exe", "dwm.exe", "conhost.exe", "spoolsv.exe", "dashost.exe",
+            "aggregatorhost.exe", "crashpad_handler.exe", "dllhost.exe", "sihost.exe",
+            "taskhostw.exe", "runtimebroker.exe", "searchhost.exe", "searchindexer.exe",
+            "shellexperiencehost.exe", "startmenuexperiencehost.exe", "ctfmon.exe", "explorer.exe",
+            "securityhealthservice.exe", "securityhealthsystray.exe", "msmpeng.exe", "nissrv.exe",
+            "wlanext.exe", "audiodg.exe", "smartscreen.exe", "wmiapsrv.exe", "wmiprvse.exe",
+            "textinputhost.exe", "monotificationux.exe", "systemsettings.exe",
+            "microsoftstartfeedprovider.exe", "tasklist.exe", "wslservice.exe", "sedsvc.exe",
+            "applicationframehost.exe", "usermodereporting.exe", "lockapp.exe", "memory compression",
+            "msedgewebview2.exe",
+        ].iter().cloned().collect();
+
+        // 将不在预设列表中、但正在用户桌面控制台运行的第三方应用进程动态加入
+        for (exe_lower, orig_name) in console_processes {
+            if seen_names.contains(&exe_lower) || system_ignore_set.contains(exe_lower.as_str()) {
+                continue;
+            }
+            seen_names.insert(exe_lower);
+            results.push(SystemAppItem {
+                name: orig_name.clone(),
+                display_name: orig_name,
+                is_running: true,
             });
         }
     }

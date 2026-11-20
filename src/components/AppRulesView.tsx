@@ -26,7 +26,7 @@ export const AppRulesView: React.FC<AppRulesViewProps> = ({
   const [systemApps, setSystemApps] = useState<SystemAppItem[]>([]);
   const [scanningApps, setScanningApps] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-  const [showGuide, setShowGuide] = useState(env?.platform === 'linux');
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     setScanningApps(true);
@@ -404,52 +404,89 @@ export const AppRulesView: React.FC<AppRulesViewProps> = ({
           })}
         </div>
 
-        {/* Linux 专属小贴士折叠指南 */}
-        {env?.platform === 'linux' && (
+        {/* 跨平台进程名与规则设置折叠指南 */}
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: '10px',
+            backgroundColor: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)',
+            marginBottom: '18px',
+          }}
+        >
           <div
+            onClick={() => setShowGuide(!showGuide)}
             style={{
-              padding: '12px 16px',
-              borderRadius: '10px',
-              backgroundColor: 'var(--bg-tertiary)',
-              border: '1px solid var(--border)',
-              marginBottom: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              userSelect: 'none',
             }}
           >
-            <div
-              onClick={() => setShowGuide(!showGuide)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                cursor: 'pointer',
-                userSelect: 'none',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 700, color: '#38bdf8' }}>
-                <HelpCircle size={16} />
-                <span>💡 实用指南：在 Linux 中如何精准获取任意窗口的真实进程名？</span>
-              </div>
-              {showGuide ? <ChevronUp size={16} color="var(--text-dim)" /> : <ChevronDown size={16} color="var(--text-dim)" />}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 700, color: '#38bdf8' }}>
+              <HelpCircle size={16} />
+              <span>
+                {env?.platform === 'windows'
+                  ? '💡 实用指南：在 Windows 中如何快速获取软件进程名与使用专属规则？'
+                  : env?.platform === 'macos'
+                  ? '💡 实用指南：在 macOS 中如何获取应用的 Bundle ID 与使用专属规则？'
+                  : '💡 实用指南：在 Linux 中如何精准获取任意窗口的真实进程名？'}
+              </span>
             </div>
-
-            {showGuide && (
-              <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.7', borderTop: '1px solid var(--border-light)', paddingTop: '10px' }}>
-                <p style={{ margin: '4px 0' }}>
-                  <strong>方法一（100% 精准对应 Rime 识别）：</strong>
-                  在终端运行 <code style={{ color: '#38bdf8' }}>xprop WM_CLASS</code>，鼠标光标会变成十字星，点击任意软件窗口，终端输出的第一个引号内容即为 Rime 的匹配程序名（如 <code style={{ color: '#34d399' }}>"mate-terminal"</code>、<code style={{ color: '#34d399' }}>"firefox-esr"</code>、<code style={{ color: '#34d399' }}>"code"</code>）。
-                </p>
-                <p style={{ margin: '4px 0' }}>
-                  <strong>方法二（终端快速检索）：</strong>
-                  运行 <code style={{ color: '#38bdf8' }}>ps -u $USER -o comm | sort -u</code> 查看当前用户启动的所有进程名，或用 <code style={{ color: '#38bdf8' }}>pgrep -l -a 软件名</code> 检索。
-                </p>
-                <p style={{ margin: '4px 0' }}>
-                  <strong>方法三（直接使用 RimeTune 智能探测）：</strong>
-                  直接查看上方「探测到当前正在运行的桌面应用」，只要软件开着，点击即自动填入！
-                </p>
-              </div>
-            )}
+            {showGuide ? <ChevronUp size={16} color="var(--text-dim)" /> : <ChevronDown size={16} color="var(--text-dim)" />}
           </div>
-        )}
+
+          {showGuide && (
+            <div style={{ marginTop: '10px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.7', borderTop: '1px solid var(--border-light)', paddingTop: '10px' }}>
+              {env?.platform === 'windows' ? (
+                <>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>方法一（智能探测一键直达，推荐）：</strong>
+                    只要目标软件正在桌面运行，RimeTune 就会在上方「探测到当前正在运行的桌面应用」列表中高亮显示（带绿色运行指示灯），直接点击右侧的 <code style={{ color: '#34d399' }}>+ 添加</code> 即可一键加入规则！
+                  </p>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>方法二（输入框自动补全）：</strong>
+                    在上方输入框中直接输入软件名称（如 <code style={{ color: '#38bdf8' }}>code</code>、<code style={{ color: '#38bdf8' }}>chrome</code>、<code style={{ color: '#38bdf8' }}>terminal</code> 等），下拉列表会自动给出推荐。若未手动输入 <code style={{ color: '#38bdf8' }}>.exe</code>，添加时会自动为您规范补齐。
+                  </p>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>方法三（Windows 任务管理器）：</strong>
+                    按快捷键 <code style={{ color: '#38bdf8' }}>Ctrl + Shift + Esc</code> 打开任务管理器，在「详细信息」列表中查看软件的进程映象名称（例如 <code style={{ color: '#34d399' }}>"cursor.exe"</code>、<code style={{ color: '#34d399' }}>"windowsterminal.exe"</code>、<code style={{ color: '#34d399' }}>"wechat.exe"</code>）。
+                  </p>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>方法四（桌面快捷方式属性）：</strong>
+                    右键点击桌面或开始菜单中软件的快捷方式 &rarr; 选择「属性」&rarr; 在「快捷方式」标签页中查看「目标」末尾的可执行文件名。
+                  </p>
+                </>
+              ) : env?.platform === 'macos' ? (
+                <>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>macOS 鼠须管 (Squirrel) 匹配规则：</strong>
+                    macOS 下通常优先匹配应用的 Bundle Identifier（例如 <code style={{ color: '#38bdf8' }}>"com.microsoft.VSCode"</code>、<code style={{ color: '#38bdf8' }}>"com.apple.Terminal"</code>、<code style={{ color: '#38bdf8' }}>"md.obsidian"</code>）。
+                  </p>
+                  <p style={{ margin: '4px 0' }}>
+                    在上方输入框支持输入 Bundle ID 或程序名称；添加后点击右上方【保存并部署】，鼠须管即可在对应应用启动时生效专属输入模式。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>方法一（100% 精准对应 Rime 识别）：</strong>
+                    在终端运行 <code style={{ color: '#38bdf8' }}>xprop WM_CLASS</code>，鼠标光标会变成十字星，点击任意软件窗口，终端输出的第一个引号内容即为 Rime 的匹配程序名（如 <code style={{ color: '#34d399' }}>"mate-terminal"</code>、<code style={{ color: '#34d399' }}>"firefox-esr"</code>、<code style={{ color: '#34d399' }}>"code"</code>）。
+                  </p>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>方法二（终端快速检索）：</strong>
+                    运行 <code style={{ color: '#38bdf8' }}>ps -u $USER -o comm | sort -u</code> 查看当前用户启动的所有进程名，或用 <code style={{ color: '#38bdf8' }}>pgrep -l -a 软件名</code> 检索。
+                  </p>
+                  <p style={{ margin: '4px 0' }}>
+                    <strong>方法三（直接使用 RimeTune 智能探测）：</strong>
+                    直接查看上方「探测到当前正在运行的桌面应用」，只要软件开着，点击即自动填入！
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* 批量操作工具栏 */}
         {appOptions.length > 0 && (
