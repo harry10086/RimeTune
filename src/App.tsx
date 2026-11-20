@@ -828,9 +828,11 @@ export function App() {
 
               {activeTab === 'app_rules' && config && (
                 <AppRulesView
-                  appOptions={config.app_options}
+                  appOptions={config.app_options || []}
                   env={env}
                   onChange={(newOptions) => setConfig((prev) => prev ? { ...prev, app_options: newOptions } : prev)}
+                  onSaveAndDeploy={() => handleSaveAndDeploy(true)}
+                  saving={saving || deploying}
                 />
               )}
 

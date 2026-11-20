@@ -741,3 +741,194 @@ pub fn scan_grammar_models(user_path: &Path) -> Vec<GrammarModelItem> {
     models
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SystemAppItem {
+    pub name: String,
+    pub display_name: String,
+    pub is_running: bool,
+}
+
+pub fn detect_system_applications() -> Vec<SystemAppItem> {
+    let mut results: Vec<SystemAppItem> = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        let mut running_comms = std::collections::HashSet::new();
+        if let Ok(entries) = std::fs::read_dir("/proc") {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if fname.chars().all(|c| c.is_ascii_digit()) {
+                    let comm_path = entry.path().join("comm");
+                    if let Ok(comm) = std::fs::read_to_string(comm_path) {
+                        let c = comm.trim().to_string();
+                        if !c.is_empty() {
+                            running_comms.insert(c);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut desktop_dirs = vec![PathBuf::from("/usr/share/applications")];
+        if let Ok(home) = std::env::var("HOME") {
+            desktop_dirs.push(PathBuf::from(home).join(".local/share/applications"));
+        }
+
+        for d in &desktop_dirs {
+            if !d.exists() { continue; }
+            if let Ok(entries) = std::fs::read_dir(d) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("desktop") {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            if content.contains("NoDisplay=true") || !content.contains("Type=Application") {
+                                continue;
+                            }
+
+                            let mut display_name = String::new();
+                            let mut fallback_name = String::new();
+                            let mut exec_cmd = String::new();
+                            let mut wm_class = String::new();
+
+                            for line in content.lines() {
+                                let line = line.trim();
+                                if line.starts_with("Name[zh_CN]=") {
+                                    display_name = line.trim_start_matches("Name[zh_CN]=").trim().to_string();
+                                } else if display_name.is_empty() && line.starts_with("Name=") {
+                                    fallback_name = line.trim_start_matches("Name=").trim().to_string();
+                                } else if line.starts_with("Exec=") && exec_cmd.is_empty() {
+                                    let raw_exec = line.trim_start_matches("Exec=").trim();
+                                    let token = raw_exec.split_whitespace().next().unwrap_or("");
+                                    let clean_token = token.trim_matches(['\'', '"']);
+                                    let bin_name = Path::new(clean_token).file_name().and_then(|f| f.to_str()).unwrap_or("");
+                                    exec_cmd = bin_name.to_string();
+                                } else if line.starts_with("StartupWMClass=") {
+                                    wm_class = line.trim_start_matches("StartupWMClass=").trim().to_string();
+                                }
+                            }
+
+                            let final_display = if !display_name.is_empty() {
+                                display_name
+                            } else if !fallback_name.is_empty() {
+                                fallback_name
+                            } else {
+                                continue;
+                            };
+
+                            let app_identifier = if !wm_class.is_empty() {
+                                wm_class.to_lowercase()
+                            } else if !exec_cmd.is_empty() {
+                                exec_cmd.clone()
+                            } else {
+                                path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string()
+                            };
+
+                            if app_identifier.is_empty() || seen_names.contains(&app_identifier) {
+                                continue;
+                            }
+                            seen_names.insert(app_identifier.clone());
+
+                            let is_running = running_comms.contains(&exec_cmd)
+                                || running_comms.contains(&app_identifier)
+                                || (!wm_class.is_empty() && running_comms.contains(&wm_class));
+
+                            results.push(SystemAppItem {
+                                name: app_identifier,
+                                display_name: final_display,
+                                is_running,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let mut running_processes = std::collections::HashSet::new();
+        let mut cmd = std::process::Command::new("tasklist");
+        cmd.args(&["/FO", "CSV", "/NH"]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        if let Ok(output) = cmd.output() {
+            if let Ok(stdout) = String::from_utf8(output.stdout) {
+                for line in stdout.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with('"') {
+                        if let Some(end_quote) = trimmed[1..].find('"') {
+                            let exe = &trimmed[1..=end_quote];
+                            running_processes.insert(exe.to_lowercase());
+                        }
+                    }
+                }
+            }
+        }
+
+        let well_known_windows_apps = [
+            ("windowsterminal.exe", "Windows 终端 (Terminal)"),
+            ("cmd.exe", "命令提示符 (CMD)"),
+            ("powershell.exe", "PowerShell 终端"),
+            ("code.exe", "Visual Studio Code"),
+            ("chrome.exe", "Google Chrome"),
+            ("msedge.exe", "Microsoft Edge"),
+            ("firefox.exe", "Mozilla Firefox"),
+            ("notepad.exe", "记事本"),
+            ("wechat.exe", "微信 (WeChat)"),
+            ("qq.exe", "腾讯 QQ"),
+            ("feishu.exe", "飞书 (Lark)"),
+            ("dingtalk.exe", "钉钉 (DingTalk)"),
+            ("obsidian.exe", "Obsidian 笔记"),
+            ("idea64.exe", "IntelliJ IDEA"),
+            ("pycharm64.exe", "PyCharm"),
+            ("devenv.exe", "Visual Studio IDE"),
+            ("sublime_text.exe", "Sublime Text"),
+            ("nvim-qt.exe", "Neovim GUI"),
+        ];
+
+        for (exe, label) in &well_known_windows_apps {
+            let exe_lower = exe.to_lowercase();
+            let is_running = running_processes.contains(&exe_lower);
+            seen_names.insert(exe_lower.clone());
+            results.push(SystemAppItem {
+                name: exe.to_string(),
+                display_name: label.to_string(),
+                is_running,
+            });
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let well_known_mac_apps = [
+            ("com.apple.Terminal", "Terminal 终端"),
+            ("com.googlecode.iterm2", "iTerm2 终端"),
+            ("com.microsoft.VSCode", "Visual Studio Code"),
+            ("com.google.Chrome", "Google Chrome"),
+            ("org.mozilla.firefox", "Firefox 网页浏览器"),
+            ("com.apple.Safari", "Safari 浏览器"),
+            ("com.apple.TextEdit", "文本编辑 (TextEdit)"),
+            ("com.tencent.xinWeChat", "微信 (WeChat)"),
+            ("com.tencent.qq", "腾讯 QQ"),
+            ("md.obsidian", "Obsidian 笔记"),
+            ("alacritty", "Alacritty 终端"),
+            ("kitty", "Kitty 终端"),
+        ];
+        for (bundle_id, label) in &well_known_mac_apps {
+            seen_names.insert(bundle_id.to_string());
+            results.push(SystemAppItem {
+                name: bundle_id.to_string(),
+                display_name: label.to_string(),
+                is_running: false,
+            });
+        }
+    }
+
+    results.sort_by(|a, b| b.is_running.cmp(&a.is_running).then_with(|| a.display_name.cmp(&b.display_name)));
+    results
+}
+

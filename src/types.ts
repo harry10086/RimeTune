@@ -90,6 +90,12 @@ export interface AppOptionItem {
   inline_preedit: boolean;
 }
 
+export interface SystemAppItem {
+  name: string;
+  display_name: string;
+  is_running: boolean;
+}
+
 export interface KeyBindingsConfig {
   page_up_down_keys: string[]; // 支持多选: "comma_period", "minus_equal", "bracket", "pageup_down"
   caps_lock?: string; // Caps Lock 动作: "clear", "inline_ascii", "commit_code", "commit_text", "noop"

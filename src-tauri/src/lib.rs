@@ -674,6 +674,11 @@ fn ensure_linux_desktop_icon() {
     let _ = std::fs::write(&desktop_file2, &desktop_content);
 }
 
+#[tauri::command]
+fn get_system_applications() -> Vec<detector::SystemAppItem> {
+    detector::detect_system_applications()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -724,6 +729,7 @@ pub fn run() {
             set_typing_stats_enabled,
             check_for_updates,
             install_linux_plugins,
+            get_system_applications,
         ])
         .run(tauri::generate_context!())
         .expect("error while running WeaselTune");
@@ -1404,6 +1410,47 @@ import_tables:
         let read3 = std::fs::read_to_string(&dict_file).unwrap();
         assert!(read3.contains("# - cn_dicts/41448"), "must comment out 41448");
         assert!(read3.contains("# 大字表生僻字无井号"), "healed comment must have hash symbol");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_detect_system_applications_and_app_options_save() {
+        // 1. 验证检测系统应用功能
+        let apps = detector::detect_system_applications();
+        assert!(!apps.is_empty(), "system applications should not be empty");
+
+        // 2. 验证 app_options 包含 false 也能完整保存和重载
+        let temp_dir = std::env::temp_dir().join(format!("rimetune_app_opts_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let u_str = temp_dir.to_str().unwrap();
+
+        let mut cfg = patcher::load_unified_config(u_str);
+        cfg.app_options = vec![
+            patcher::AppOptionItem {
+                app_name: "custom_editor".to_string(),
+                ascii_mode: false,
+                inline_preedit: false,
+            },
+            patcher::AppOptionItem {
+                app_name: "custom_term".to_string(),
+                ascii_mode: true,
+                inline_preedit: true,
+            },
+        ];
+
+        patcher::save_unified_config(u_str, cfg).unwrap();
+
+        let reloaded = patcher::load_unified_config(u_str);
+        let editor = reloaded.app_options.iter().find(|a| a.app_name == "custom_editor");
+        assert!(editor.is_some(), "custom_editor with both false must not be lost");
+        assert!(!editor.unwrap().ascii_mode);
+        assert!(!editor.unwrap().inline_preedit);
+
+        let term = reloaded.app_options.iter().find(|a| a.app_name == "custom_term");
+        assert!(term.is_some(), "custom_term must exist");
+        assert!(term.unwrap().ascii_mode);
+        assert!(term.unwrap().inline_preedit);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

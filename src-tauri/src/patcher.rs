@@ -4395,12 +4395,8 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
         let name = app.app_name.trim();
         if !name.is_empty() {
             let escaped_name = yaml_escape_str(name);
-            if app.ascii_mode {
-                weasel_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": true\n", escaped_name));
-            }
-            if app.inline_preedit {
-                weasel_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": true\n", escaped_name));
-            }
+            weasel_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": {}\n", escaped_name, app.ascii_mode));
+            weasel_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": {}\n", escaped_name, app.inline_preedit));
         }
     }
 
@@ -4499,12 +4495,8 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             let name = app.app_name.trim();
             if !name.is_empty() {
                 let escaped_name = yaml_escape_str(name);
-                if app.ascii_mode {
-                    default_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": true\n", escaped_name));
-                }
-                if app.inline_preedit {
-                    default_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": true\n", escaped_name));
-                }
+                default_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": {}\n", escaped_name, app.ascii_mode));
+                default_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": {}\n", escaped_name, app.inline_preedit));
             }
         }
     }
