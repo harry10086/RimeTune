@@ -3600,11 +3600,13 @@ pub fn load_unified_config(user_dir: &str) -> UnifiedFullConfig {
     let mut fuzzy_pinyin = FuzzyPinyinConfig::default();
     let mut rime_ice_toggles = RimeIceToggles::default();
 
-    // 1. 读取外观与应用设置（兼容 weasel.custom.yaml 与 macOS 鼠须管 squirrel.custom.yaml）
+    // 1. 读取外观与应用设置（兼容 weasel.custom.yaml、macOS 鼠须管 squirrel.custom.yaml 与 Linux Fcitx5 fcitx5.custom.yaml）
     let custom_files_to_try = if cfg!(target_os = "macos") {
-        ["squirrel.custom.yaml", "weasel.custom.yaml"]
+        ["squirrel.custom.yaml", "weasel.custom.yaml", "fcitx5.custom.yaml"]
+    } else if cfg!(target_os = "linux") || user_dir.contains("fcitx5") {
+        ["fcitx5.custom.yaml", "weasel.custom.yaml", "squirrel.custom.yaml"]
     } else {
-        ["weasel.custom.yaml", "squirrel.custom.yaml"]
+        ["weasel.custom.yaml", "squirrel.custom.yaml", "fcitx5.custom.yaml"]
     };
     let mut custom_file_path: Option<PathBuf> = None;
     for fname in &custom_files_to_try {
@@ -4471,9 +4473,46 @@ pub fn save_unified_config(user_dir: &str, config: UnifiedFullConfig) -> Result<
             .map_err(|e| format!("写入 weasel.custom.yaml 失败: {}", e))?;
     }
 
-    // 在 Linux 环境下清理可能残留的历史 weasel.custom.yaml
-    if is_linux && u_path.join("weasel.custom.yaml").exists() {
-        let _ = fs::remove_file(u_path.join("weasel.custom.yaml"));
+    // 在 Linux 环境下清理可能残留的历史 weasel.custom.yaml，并写入 fcitx5.custom.yaml 与 fcitx5.yaml
+    if is_linux {
+        if u_path.join("weasel.custom.yaml").exists() {
+            let _ = fs::remove_file(u_path.join("weasel.custom.yaml"));
+        }
+
+        // 1. 生成 fcitx5.custom.yaml 补丁
+        let mut fcitx5_custom_yaml = String::new();
+        fcitx5_custom_yaml.push_str("# RimeTune 生成的 Fcitx5 特定应用专属行为补丁\n");
+        fcitx5_custom_yaml.push_str("patch:\n");
+        for app in &config.app_options {
+            let name = app.app_name.trim();
+            if !name.is_empty() {
+                let clean_name = name.strip_suffix(".exe").unwrap_or(name);
+                let escaped_name = yaml_escape_str(clean_name);
+                fcitx5_custom_yaml.push_str(&format!("  \"app_options/{}/ascii_mode\": {}\n", escaped_name, app.ascii_mode));
+                fcitx5_custom_yaml.push_str(&format!("  \"app_options/{}/inline_preedit\": {}\n", escaped_name, app.inline_preedit));
+            }
+        }
+        let _ = fs::write(u_path.join("fcitx5.custom.yaml"), &fcitx5_custom_yaml);
+
+        // 2. 同时生成 user_dir/fcitx5.yaml 与 build/fcitx5.yaml
+        // fcitx5-rime 内部通过 api_->config_open("fcitx5") 直接读取映射
+        let mut fcitx5_compiled = String::new();
+        fcitx5_compiled.push_str("config_version: \"0.22\"\n");
+        fcitx5_compiled.push_str("app_options:\n");
+        for app in &config.app_options {
+            let name = app.app_name.trim();
+            if !name.is_empty() {
+                let clean_name = name.strip_suffix(".exe").unwrap_or(name);
+                let escaped_name = yaml_escape_str(clean_name);
+                fcitx5_compiled.push_str(&format!("  \"{}\":\n", escaped_name));
+                fcitx5_compiled.push_str(&format!("    ascii_mode: {}\n", app.ascii_mode));
+                fcitx5_compiled.push_str(&format!("    inline_preedit: {}\n", app.inline_preedit));
+            }
+        }
+        let _ = fs::write(u_path.join("fcitx5.yaml"), &fcitx5_compiled);
+        let build_dir = u_path.join("build");
+        let _ = fs::create_dir_all(&build_dir);
+        let _ = fs::write(build_dir.join("fcitx5.yaml"), &fcitx5_compiled);
     }
 
     // 2. 保存 default.custom.yaml (输入方案与中英按键)
